@@ -564,7 +564,8 @@ namespace dxvk {
     const bool enableRt = instance.options().enableRayTracing && !safeMode
       && m_featuresSupported.vk12.bufferDeviceAddress
       && m_featuresSupported.khrDeferredHostOperations
-      && m_featuresSupported.khrAccelerationStructure.accelerationStructure;
+      && m_featuresSupported.khrAccelerationStructure.accelerationStructure
+      && m_featuresSupported.khrRayQuery.rayQuery;
     if (!enableRt) {
       m_featuresSupported.khrAccelerationStructure.accelerationStructure = VK_FALSE;
       m_featuresSupported.khrRayTracingPipeline.rayTracingPipeline = VK_FALSE;
