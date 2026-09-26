@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.24)
+project(DxvkRtLab LANGUAGES CXX)
+if(NOT WIN32)
+  message(FATAL_ERROR "The test host currently supports Windows only")
+endif()
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+find_program(GLSLANG glslangValidator HINTS "${CMAKE_CURRENT_SOURCE_DIR}/../.." "$ENV{VULKAN_SDK}/Bin" REQUIRED)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rt_shader.h"
+  COMMAND "${GLSLANG}" -V --target-env vulkan1.2 --vn rt_shader
+    -o "${CMAKE_CURRENT_BINARY_DIR}/rt_shader.h" "${CMAKE_CURRENT_SOURCE_DIR}/trace.comp"
+  DEPENDS trace.comp VERBATIM)
+add_library(dxvk_rt STATIC rt.cpp "${CMAKE_CURRENT_BINARY_DIR}/rt_shader.h")
+target_include_directories(dxvk_rt PUBLIC . ../../include/vulkan/include ../../include PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(dxvk_rt PUBLIC VK_NO_PROTOTYPES NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_features(dxvk_rt PUBLIC cxx_std_17)
+target_compile_options(dxvk_rt PRIVATE /W4 /WX /utf-8 /permissive-)
+add_executable(rt_test test.cpp)
+target_link_libraries(rt_test PRIVATE dxvk_rt)
+target_compile_options(rt_test PRIVATE /W4 /WX /utf-8 /permissive-)
+enable_testing()
+add_test(NAME rt_gpu COMMAND rt_test)
+set_tests_properties(rt_gpu PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77)
