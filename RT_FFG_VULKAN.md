@@ -4,27 +4,27 @@ This fork now has an opt-in Vulkan ray-tracing capability gate:
 
     dxvk.enableRayTracing = True
 
-When enabled, DXVK requests the Vulkan KHR acceleration-structure,
-ray-tracing-pipeline, ray-query and deferred-host-operations extensions when
-the physical device exposes them. The enabled device log reports a capability
-message; it does not claim that an RT pass was rendered.
+When enabled, DXVK starts the x64 `rt_helper.exe` bridge if present. The 32-bit
+DXVK DLL captures supported D3D9 geometry/camera data, the helper renders the
+Vulkan RT pass, and the result is copied into the ordinary DXVK backbuffer
+before Present. Missing helper, unsupported draws, or a failed frame leave the
+normal raster path in place.
 When the option is absent or false, the existing raster path is unchanged.
 
-`experimental/rt` now contains a real x64 Vulkan RT implementation and a
-hardware test. It builds BLAS/TLAS, runs a `VK_KHR_ray_query` compute shader,
-and verifies GPU color/depth/motion/object-ID output on the RTX 3050. This is
-the renderer-side proof point, not yet the L4D2 game path: the DXVK D3D9 draw
-stream is not currently being converted into these BLAS/TLAS resources and no
-RT result is composited into the game's swapchain yet.
+`experimental/rt` contains a real x64 Vulkan RT implementation and a hardware
+test. It builds BLAS/TLAS, runs a `VK_KHR_ray_query` compute shader, and
+verifies GPU color/depth/motion/object-ID output on the RTX 3050. The bridge
+test also proves the x86-to-x64 process boundary and the optional second-frame
+FFG record path.
 
 The Vulkan FGDS ABI is mirrored in include/fgds/fgds_vk.h and the FreeFrameGen
-repository. It carries Color, Depth, Motion, Object ID, camera metadata and
-timeline-semaphore readiness without converting the Vulkan device to D3D12.
-FreeFrameGen now has a separate Vulkan compute runtime that consumes this ABI;
-the L4D2 producer and actual RT geometry capture are still future integration
-work.
+repository. The helper constructs two `FgdsVkFrame` records from consecutive RT
+frames and, when `DXVK_FFG_ENABLE=1`, calls the dynamically loaded
+`ffgVkRecord` compute runtime without taking device or queue ownership.
 
 The RTX 3050 probe exposes these RT extensions to a 64-bit process but not to
-a 32-bit process. Since L4D2 is 32-bit, the next integration task is a 64-bit
-helper with explicit Vulkan external-memory/semaphore handoff; a 32-bit DXVK
-DLL cannot safely claim to run ray queries on this driver.
+a 32-bit process. Since L4D2 is 32-bit, the helper boundary is required on
+this driver. The current bridge uses named shared memory for CPU-visible
+outputs and is a development path, not a finished production compositor. Real
+L4D2 material coverage, performance, and VAC-safe deployment still require
+offline testing.

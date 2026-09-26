@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <unordered_set>
 #include "d3d9_bridge.h"
+#include "d3d9_rt_bridge.h"
 
 #include <vector>
 #include <type_traits>
@@ -812,6 +813,37 @@ namespace dxvk {
       return m_dxvkDevice;
     }
 
+    void RtBeginFrame();
+    void RtEndFrame();
+    void RtCapturePrimitive(
+            D3DPRIMITIVETYPE PrimitiveType,
+            UINT             StartVertex,
+            UINT             PrimitiveCount);
+    void RtCaptureIndexedPrimitive(
+            D3DPRIMITIVETYPE PrimitiveType,
+            INT              BaseVertexIndex,
+            UINT             MinVertexIndex,
+            UINT             NumVertices,
+            UINT             StartIndex,
+            UINT             PrimitiveCount);
+    void RtCapturePrimitiveUP(
+            D3DPRIMITIVETYPE PrimitiveType,
+            UINT             PrimitiveCount,
+      const void*            pVertexStreamZeroData,
+            UINT             VertexStreamZeroStride);
+    void RtCaptureIndexedPrimitiveUP(
+            D3DPRIMITIVETYPE PrimitiveType,
+            UINT             MinVertexIndex,
+            UINT             NumVertices,
+            UINT             PrimitiveCount,
+      const void*            pIndexData,
+            D3DFORMAT          IndexDataFormat,
+      const void*            pVertexStreamZeroData,
+            UINT               VertexStreamZeroStride);
+    bool RtRenderFrame(uint32_t width, uint32_t height, D3D9RtBridge::Output& output);
+    bool RtUploadColor(const Rc<DxvkImage>& image, uint32_t width, uint32_t height,
+                       const std::vector<uint8_t>& color);
+
     D3D9_VK_FORMAT_MAPPING LookupFormat(
       D3D9Format            Format) const;
 
@@ -1223,6 +1255,12 @@ namespace dxvk {
 
   private:
 
+    dxvk::rt::bridge::Camera RtGetCamera() const;
+    void RtCaptureDraw(D3DPRIMITIVETYPE primitiveType, UINT primitiveCount,
+      const uint8_t* vertices, size_t vertexBytes, UINT stride, UINT vertexOffset,
+      const uint8_t* indices, size_t indexBytes, UINT indexStride,
+      UINT startIndex, INT baseVertex);
+
     template<bool AllowFlush = true, typename Cmd>
     void EmitCs(Cmd&& command) {
       if (unlikely(m_csDataType != D3D9CmdType::None)) {
@@ -1565,6 +1603,14 @@ namespace dxvk {
 
     D3D9Adapter*                    m_adapter;
     Rc<DxvkDevice>                  m_dxvkDevice;
+
+    std::unique_ptr<D3D9RtBridge>   m_rtBridge;
+    dxvk::rt::bridge::Camera        m_rtPreviousCamera = {};
+    bool                            m_rtHasPreviousCamera = false;
+    dxvk::rt::bridge::Camera        m_rtCamera = {};
+    bool                            m_rtHasCamera = false;
+    bool                            m_rtIncompleteScene = false;
+    uint32_t                        m_rtObjectId = 1u;
 
     MemoryFilePool                  m_memoryAllocator;
 

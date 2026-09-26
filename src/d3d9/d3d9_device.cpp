@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cstring>
 #ifdef MSC_VER
 #pragma fenv_access (on)
 #endif
@@ -146,6 +147,12 @@ namespace dxvk {
                 D3D9DeviceDirtyFlag::SpecializationEntries);
 
     m_specData.setDrefScale(m_d3d9Options.drefScaling);
+
+    if (m_dxvkDevice->instance()->options().enableRayTracing) {
+      m_rtBridge = std::make_unique<D3D9RtBridge>();
+      if (!m_rtBridge->available())
+        Logger::warn("D3D9: dxvk.enableRayTracing is enabled, but rt_helper.exe was not found or could not be started");
+    }
 
     BindFFUbershader<D3D9ShaderType::VertexShader>();
     BindFFUbershader<D3D9ShaderType::PixelShader>();
@@ -3032,6 +3039,8 @@ namespace dxvk {
     if (unlikely(!PrimitiveCount))
       return D3D_OK;
 
+    RtCapturePrimitive(PrimitiveType, StartVertex, PrimitiveCount);
+
     bool dynamicSysmemVBOs = false;
 
     uint32_t firstIndex     = 0;
@@ -3083,6 +3092,9 @@ namespace dxvk {
 
     if (unlikely(!PrimitiveCount || !NumVertices))
       return D3D_OK;
+
+    RtCaptureIndexedPrimitive(PrimitiveType, BaseVertexIndex, MinVertexIndex,
+      NumVertices, StartIndex, PrimitiveCount);
 
     bool dynamicSysmemVBOs = false;
     bool dynamicSysmemIBO = false;
@@ -3148,6 +3160,9 @@ namespace dxvk {
     if (unlikely(!PrimitiveCount))
       return D3D_OK;
 
+    RtCapturePrimitiveUP(PrimitiveType, PrimitiveCount,
+      pVertexStreamZeroData, VertexStreamZeroStride);
+
     PrepareDraw(PrimitiveType, false, false);
 
     uint32_t vertexCount = GetVertexCount(PrimitiveType, PrimitiveCount);
@@ -3201,6 +3216,10 @@ namespace dxvk {
 
     if (unlikely(!PrimitiveCount || !NumVertices))
       return D3D_OK;
+
+    RtCaptureIndexedPrimitiveUP(PrimitiveType, MinVertexIndex, NumVertices,
+      PrimitiveCount, pIndexData, IndexDataFormat,
+      pVertexStreamZeroData, VertexStreamZeroStride);
 
     PrepareDraw(PrimitiveType, false, false);
 

@@ -15,8 +15,10 @@ The shader emits:
 
 The command recording path does not submit, wait, or present. The host test
 owns the Vulkan device and verifies the GPU image against a small CPU oracle.
-That separation is the same boundary needed by DXVK and FFG, but this target
-does not yet intercept L4D2's D3D9 draw stream or replace its swapchain.
+The x86 DXVK side now captures supported D3D9 triangle draws and camera data,
+while the x64 helper owns BLAS/TLAS construction and Vulkan submission. The
+optional FFG Vulkan runtime is loaded in that helper and consumes two
+consecutive GPU frames through the FGDS Color/Depth/Motion/Object-ID contract.
 
 ## Build and run
 
@@ -46,6 +48,10 @@ triangle scene from a 32-bit process, then asks the 64-bit helper to execute
 the real Vulkan RT shader. A `PASS cross-bitness RT bridge` result proves the
 process boundary and GPU result path, not L4D2 integration.
 
+To exercise FFG, put `FreeFrameGenVulkan.dll` next to `rt_helper.exe` and set
+`$env:L4D2_RT_TEST_FFG = '1'` before running the client. The helper log must
+contain `FFG frame generated` after the second render.
+
 The hardware test returns `77` only when no Vulkan device exposes the required
 ray-query, acceleration-structure, buffer-address, and storage-image features.
 It does not silently fall back to CPU tracing.
@@ -60,6 +66,11 @@ this driver. The game integration therefore needs a 64-bit helper/renderer
 boundary (with explicit external-memory and semaphore ownership) before its
 swapchain can be replaced. The current target deliberately stops at the
 hardware and bridge proof point instead of pretending that a 32-bit capability
-gate is game ray tracing. The next integration step is to feed DXVK's captured
-scene/camera data into this helper and copy its result into the normal DXVK
-present path; that work is not yet enabled by default.
+gate is game ray tracing. The DXVK integration is opt-in with
+`dxvk.enableRayTracing = True`. It looks for `rt_helper.exe` next to the game
+executable (or the path in `DXVK_RT_HELPER_PATH`), captures triangle-list,
+triangle-strip and triangle-fan draws, and uploads the helper's RGBA8 result to
+the normal DXVK backbuffer before Present. Set `DXVK_FFG_ENABLE=1` to request
+helper-side FFG when `FreeFrameGenVulkan.dll` is available (or set
+`DXVK_FFG_VULKAN_PATH`). This runtime path is not yet validated against every
+L4D2 material/shader or a VAC server; keep it offline while testing.

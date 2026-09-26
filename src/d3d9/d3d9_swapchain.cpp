@@ -161,6 +161,18 @@ namespace dxvk {
     UpdatePresentRegion(pSourceRect, pDestRect);
     UpdatePresentParameters();
 
+    D3D9RtBridge::Output rtOutput;
+    const bool rtFrame = m_parent->RtRenderFrame(
+      m_presentParams.BackBufferWidth,
+      m_presentParams.BackBufferHeight,
+      rtOutput);
+    if (rtFrame && m_parent->RtUploadColor(
+      m_backBuffers[0]->GetCommonTexture()->GetImage(),
+      rtOutput.width, rtOutput.height, rtOutput.color)) { }
+    // Always reset capture state, including when an unsupported draw or a
+    // helper failure made the optional RT path decline this frame.
+    m_parent->RtEndFrame();
+
     if (!SwapWithFrontBuffer() && m_parent->GetOptions()->extraFrontbuffer) {
       // We never actually rotate in the front buffer.
       // Just blit to it for GetFrontBufferData.

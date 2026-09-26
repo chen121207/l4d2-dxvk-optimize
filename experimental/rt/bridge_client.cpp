@@ -1,12 +1,12 @@
-#include "bridge.hpp"
+#include "bridge_layout.hpp"
 #include <windows.h>
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-using namespace dxvk::rt;
 using namespace dxvk::rt::bridge;
 
 namespace {
@@ -50,6 +50,10 @@ int wmain() {
     // across process boundaries, so initialize the wire header explicitly.
     shared->control.magic = Magic;
     shared->control.version = Version;
+    wchar_t ffgEnabled[8]{};
+    shared->control.fgEnable = GetEnvironmentVariableW(L"L4D2_RT_TEST_FFG", ffgEnabled, 8)
+      && std::wstring(ffgEnabled) == L"1" ? 1u : 0u;
+    shared->control.fgAlpha = 0.5f;
     InterlockedExchange(&shared->control.command, Idle);
     InterlockedExchange(&shared->control.status, NotReady);
     const auto module = [] {
@@ -65,19 +69,42 @@ int wmain() {
     std::vector<Triangle> triangles; fixture(triangles);
     shared->control.triangleCount = uint32_t(triangles.size()); std::copy(triangles.begin(), triangles.end(), shared->triangles);
     command(shared, ready.value, done.value, processHandle.value, UploadScene);
-    shared->control.width = 96; shared->control.height = 64;
+    shared->control.width = 96; shared->control.height = 64; shared->control.frameId = 1;
     shared->control.current = Camera{}; shared->control.current.aspect = 96.0f / 64.0f;
     shared->control.other = shared->control.current; shared->control.other.origin.y = .25f;
     command(shared, ready.value, done.value, processHandle.value, Render);
     if (shared->control.outputBytes != 96u * 64u * 4u) throw std::runtime_error("invalid RT output size");
+    if (shared->control.depthBytes != 96u * 64u * sizeof(float)
+        || shared->control.motionBytes != 96u * 64u * 2u * sizeof(float)
+        || shared->control.objectIdBytes != 96u * 64u * sizeof(uint32_t))
+      throw std::runtime_error("invalid FGDS auxiliary output sizes");
     size_t lit = 0; for (size_t i = 0; i < shared->control.outputBytes; i += 4) if (shared->output[i] || shared->output[i+1] || shared->output[i+2]) ++lit;
     if (lit < 1000) throw std::runtime_error("RT helper returned an empty image");
+    size_t hits = 0, motionPixels = 0;
+    for (size_t i = 0; i < 96u * 64u; ++i) {
+      if (!shared->objectId[i]) continue;
+      ++hits;
+      if (!std::isfinite(shared->depth[i]) || shared->depth[i] <= 0)
+        throw std::runtime_error("invalid RT depth");
+      if (std::isfinite(shared->motion[i * 2]) && std::abs(shared->motion[i * 2]) > 0.01f)
+        ++motionPixels;
+    }
+    if (hits < 1000 || motionPixels < 1000)
+      throw std::runtime_error("RT helper returned empty depth/motion/object ID data");
+    if (shared->control.fgEnable) {
+      shared->control.frameId = 2;
+      shared->control.current.origin.y = 0.5f;
+      command(shared, ready.value, done.value, processHandle.value, Render);
+      if (shared->control.outputBytes != 96u * 64u * 4u)
+        throw std::runtime_error("FFG render returned an invalid output size");
+    }
     command(shared, ready.value, done.value, processHandle.value, Stop);
     WaitForSingleObject(processHandle.value, 30000);
     DWORD helperExit = STILL_ACTIVE;
     GetExitCodeProcess(processHandle.value, &helperExit);
     if (helperExit != 0) throw std::runtime_error("RT helper exited with failure");
-    std::wcout << L"PASS cross-bitness RT bridge pixels=" << lit << L" helper_exit=" << helperExit << L"\n";
+    std::wcout << L"PASS cross-bitness RT bridge pixels=" << lit << L" hits=" << hits
+      << L" motion=" << motionPixels << L" helper_exit=" << helperExit << L"\n";
     return 0;
   } catch (const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }
 }
