@@ -60,6 +60,9 @@ namespace dxvk {
     HANDLE_EXT(khrMaintenance10);                  \
     HANDLE_EXT(khrMaintenance11);                  \
     HANDLE_EXT(khrPipelineLibrary);                \
+    HANDLE_EXT(khrAccelerationStructure);          \
+    HANDLE_EXT(khrRayTracingPipeline);             \
+    HANDLE_EXT(khrDeferredHostOperations);         \
     HANDLE_EXT(khrPresentId);                      \
     HANDLE_EXT(khrPresentId2);                     \
     HANDLE_EXT(khrPresentWait);                    \
@@ -97,7 +100,9 @@ namespace dxvk {
     HANDLE_EXT(khrMaintenance6);                   \
     HANDLE_EXT(khrMaintenance7);                   \
     HANDLE_EXT(khrMaintenance9);                   \
-    HANDLE_EXT(khrMaintenance10);
+    HANDLE_EXT(khrMaintenance10);                  \
+    HANDLE_EXT(khrAccelerationStructure);          \
+    HANDLE_EXT(khrRayTracingPipeline);
 
 
   DxvkDeviceCapabilities::DxvkDeviceCapabilities(
@@ -218,6 +223,12 @@ namespace dxvk {
            << "  Graphics : (" << m_queueMapping.graphics.family << ", " << m_queueMapping.graphics.index << ")" << std::endl
            << "  Transfer : (" << m_queueMapping.transfer.family << ", " << m_queueMapping.transfer.index << ")" << std::endl
            << "  Sparse   : (" << m_queueMapping.sparse.family   << ", " << m_queueMapping.sparse.index   << ")" << std::endl;
+
+    stream << "Ray tracing: "
+           << (m_featuresEnabled.khrAccelerationStructure.accelerationStructure
+             && m_featuresEnabled.khrRayTracingPipeline.rayTracingPipeline
+             && m_featuresEnabled.khrDeferredHostOperations ? "enabled" : "disabled")
+           << std::endl;
 
     // Log memory type and heap properties
     static const std::array<std::pair<VkMemoryPropertyFlagBits, const char*>, 8> s_flags = {{
@@ -545,6 +556,15 @@ namespace dxvk {
     // Disable unified layouts if disabled via config
     if (!instance.options().enableUnifiedImageLayout)
       m_featuresSupported.khrUnifiedImageLayouts.unifiedImageLayouts = VK_FALSE;
+
+    // Ray tracing is opt-in until DXVK has a complete scene build and RT
+    // submission path. Keeping the features out of the device create chain
+    // preserves the existing raster path when the option is not requested.
+    if (!instance.options().enableRayTracing) {
+      m_featuresSupported.khrAccelerationStructure.accelerationStructure = VK_FALSE;
+      m_featuresSupported.khrRayTracingPipeline.rayTracingPipeline = VK_FALSE;
+      m_featuresSupported.khrDeferredHostOperations = VK_FALSE;
+    }
 
     if (env::is32BitHostPlatform() || !env::isWineVulkan() || safeMode || !instance.options().enableNvCudaInterop) {
       // CUDA interop is unnecessary on 32-bit, no games use it. These extensions
@@ -1071,6 +1091,11 @@ namespace dxvk {
 
       /* Dependency for graphics pipeline library */
       ENABLE_EXT(khrPipelineLibrary, false),
+
+      /* Optional Vulkan ray tracing stack. */
+      ENABLE_EXT_FEATURE(khrAccelerationStructure, accelerationStructure, false),
+      ENABLE_EXT_FEATURE(khrRayTracingPipeline, rayTracingPipeline, false),
+      ENABLE_EXT(khrDeferredHostOperations, false),
 
       /* Present wait, used for frame pacing and statistics */
       ENABLE_EXT_FEATURE(khrPresentId, presentId, false),

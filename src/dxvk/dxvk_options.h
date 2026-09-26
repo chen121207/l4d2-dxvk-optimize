@@ -89,6 +89,10 @@ namespace dxvk {
     /// Enable present timing features
     bool enablePresentTiming = true;
 
+    /// Enable Vulkan ray tracing extensions and features.
+    /// Disabled by default because DXVK does not submit an RT pass yet.
+    bool enableRayTracing = false;
+
     /// Enable descriptor update templates
     bool enableDescriptorUpdateTemplates = env::is32BitHostPlatform();
 

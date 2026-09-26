@@ -321,6 +321,15 @@ namespace dxvk {
     }
 
     /**
+     * Checks whether the optional Vulkan ray tracing stack is enabled.
+     */
+    bool canUseRayTracing() const {
+      return m_features.khrAccelerationStructure.accelerationStructure
+          && m_features.khrRayTracingPipeline.rayTracingPipeline
+          && m_features.khrDeferredHostOperations;
+    }
+
+    /**
      * \brief Checks whether CUDA interop is enabled
      *
      * Relevant for descriptor heap usage since CUDA interop still
