@@ -62,6 +62,7 @@ namespace dxvk {
     HANDLE_EXT(khrPipelineLibrary);                \
     HANDLE_EXT(khrAccelerationStructure);          \
     HANDLE_EXT(khrRayTracingPipeline);             \
+    HANDLE_EXT(khrRayQuery);                       \
     HANDLE_EXT(khrDeferredHostOperations);         \
     HANDLE_EXT(khrPresentId);                      \
     HANDLE_EXT(khrPresentId2);                     \
@@ -224,7 +225,7 @@ namespace dxvk {
            << "  Transfer : (" << m_queueMapping.transfer.family << ", " << m_queueMapping.transfer.index << ")" << std::endl
            << "  Sparse   : (" << m_queueMapping.sparse.family   << ", " << m_queueMapping.sparse.index   << ")" << std::endl;
 
-    stream << "Ray tracing: "
+    stream << "RT pipeline capability (not a rendered effect): "
            << (m_featuresEnabled.khrAccelerationStructure.accelerationStructure
              && m_featuresEnabled.khrRayTracingPipeline.rayTracingPipeline
              && m_featuresEnabled.khrDeferredHostOperations ? "enabled" : "disabled")
@@ -560,9 +561,14 @@ namespace dxvk {
     // Ray tracing is opt-in until DXVK has a complete scene build and RT
     // submission path. Keeping the features out of the device create chain
     // preserves the existing raster path when the option is not requested.
-    if (!instance.options().enableRayTracing) {
+    const bool enableRt = instance.options().enableRayTracing && !safeMode
+      && m_featuresSupported.vk12.bufferDeviceAddress
+      && m_featuresSupported.khrDeferredHostOperations
+      && m_featuresSupported.khrAccelerationStructure.accelerationStructure;
+    if (!enableRt) {
       m_featuresSupported.khrAccelerationStructure.accelerationStructure = VK_FALSE;
       m_featuresSupported.khrRayTracingPipeline.rayTracingPipeline = VK_FALSE;
+      m_featuresSupported.khrRayQuery.rayQuery = VK_FALSE;
       m_featuresSupported.khrDeferredHostOperations = VK_FALSE;
     }
 
@@ -1095,6 +1101,7 @@ namespace dxvk {
       /* Optional Vulkan ray tracing stack. */
       ENABLE_EXT_FEATURE(khrAccelerationStructure, accelerationStructure, false),
       ENABLE_EXT_FEATURE(khrRayTracingPipeline, rayTracingPipeline, false),
+      ENABLE_EXT_FEATURE(khrRayQuery, rayQuery, false),
       ENABLE_EXT(khrDeferredHostOperations, false),
 
       /* Present wait, used for frame pacing and statistics */

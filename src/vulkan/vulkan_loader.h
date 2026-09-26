@@ -515,6 +515,20 @@ namespace dxvk::vk {
     VULKAN_FN(vkCmdBindDescriptorBufferEmbeddedSamplers2EXT);
     #endif
 
+    #ifdef VK_KHR_acceleration_structure
+    VULKAN_FN(vkCreateAccelerationStructureKHR);
+    VULKAN_FN(vkDestroyAccelerationStructureKHR);
+    VULKAN_FN(vkGetAccelerationStructureBuildSizesKHR);
+    VULKAN_FN(vkGetAccelerationStructureDeviceAddressKHR);
+    VULKAN_FN(vkCmdBuildAccelerationStructuresKHR);
+    #endif
+
+    #ifdef VK_KHR_ray_tracing_pipeline
+    VULKAN_FN(vkCreateRayTracingPipelinesKHR);
+    VULKAN_FN(vkGetRayTracingShaderGroupHandlesKHR);
+    VULKAN_FN(vkCmdTraceRaysKHR);
+    #endif
+
     #ifdef VK_KHR_present_wait
     VULKAN_FN(vkWaitForPresentKHR);
     #endif
