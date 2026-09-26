@@ -6,11 +6,12 @@
 #include <limits>
 
 namespace dxvk::rt {
-void Device::load(PFN_vkGetDeviceProcAddr getProc) {
+void Device::load(PFN_vkGetDeviceProcAddr getProc, bool rayTracing) {
   if (!getProc || !handle || !physical || !scratchAlignment)
     throw std::runtime_error("Invalid RT device configuration");
 #define LOAD(name) name = reinterpret_cast<PFN_##name>(getProc(handle, #name)); \
-  if (!name) throw std::runtime_error("Missing RT device entry point: " #name);
+  if (!name && (rayTracing || !std::strstr(#name,"AccelerationStructure"))) \
+    throw std::runtime_error("Missing device entry point: " #name);
   RT_DEVICE_FUNCTIONS(LOAD)
 #undef LOAD
 }

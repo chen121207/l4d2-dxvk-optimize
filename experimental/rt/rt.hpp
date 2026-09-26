@@ -62,7 +62,7 @@ struct Device {
 #undef DECLARE
   // Requires enabled bufferDeviceAddress, accelerationStructure, rayQuery,
   // shaderStorageImageExtendedFormats, compute queue, and Vulkan >= 1.2.
-  void load(PFN_vkGetDeviceProcAddr getProc);
+  void load(PFN_vkGetDeviceProcAddr getProc, bool rayTracing = true);
   uint32_t memoryType(uint32_t bits, VkMemoryPropertyFlags flags) const;
 };
 struct Buffer {

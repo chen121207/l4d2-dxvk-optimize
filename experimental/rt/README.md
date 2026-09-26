@@ -31,3 +31,15 @@ build-rt-x64/Release/rt_test.exe --output artifacts/rt-test
 The hardware test returns `77` only when no Vulkan device exposes the required
 ray-query, acceleration-structure, buffer-address, and storage-image features.
 It does not silently fall back to CPU tracing.
+
+## Current L4D2 process boundary
+
+The test was run in both target bitnesses on the development RTX 3050. The
+64-bit process exposes `VK_KHR_acceleration_structure` and
+`VK_KHR_ray_query`; the 32-bit process exposes neither. L4D2 is a 32-bit
+process, so a 32-bit `d3d9.dll` cannot create a Vulkan ray-tracing device on
+this driver. The game integration therefore needs a 64-bit helper/renderer
+boundary (with explicit external-memory and semaphore ownership) before its
+swapchain can be replaced. The current target deliberately stops at the
+hardware proof point instead of pretending that a 32-bit capability gate is
+game ray tracing.

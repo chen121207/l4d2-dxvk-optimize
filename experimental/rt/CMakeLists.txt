@@ -11,7 +11,7 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rt_shader.h"
   DEPENDS trace.comp VERBATIM)
 add_library(dxvk_rt STATIC rt.cpp "${CMAKE_CURRENT_BINARY_DIR}/rt_shader.h")
 target_include_directories(dxvk_rt PUBLIC . ../../include/vulkan/include ../../include PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_definitions(dxvk_rt PUBLIC VK_NO_PROTOTYPES NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_definitions(dxvk_rt PUBLIC VK_NO_PROTOTYPES VK_USE_PLATFORM_WIN32_KHR NOMINMAX WIN32_LEAN_AND_MEAN)
 target_compile_features(dxvk_rt PUBLIC cxx_std_17)
 target_compile_options(dxvk_rt PRIVATE /W4 /WX /utf-8 /permissive-)
 add_executable(rt_test test.cpp)

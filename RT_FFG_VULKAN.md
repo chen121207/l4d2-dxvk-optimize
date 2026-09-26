@@ -23,3 +23,8 @@ timeline-semaphore readiness without converting the Vulkan device to D3D12.
 FreeFrameGen now has a separate Vulkan compute runtime that consumes this ABI;
 the L4D2 producer and actual RT geometry capture are still future integration
 work.
+
+The RTX 3050 probe exposes these RT extensions to a 64-bit process but not to
+a 32-bit process. Since L4D2 is 32-bit, the next integration task is a 64-bit
+helper with explicit Vulkan external-memory/semaphore handoff; a 32-bit DXVK
+DLL cannot safely claim to run ray queries on this driver.
