@@ -18,11 +18,18 @@ void fixture(std::vector<Triangle>& triangles) {
   quad({10, -30, -30}, {10, 30, -30}, {10, 30, 30}, {10, -30, 30}, 1);
   quad({5, -1, -1}, {5, 1, -1}, {5, 1, 1}, {5, -1, 1}, 2);
 }
-void command(Shared* shared, HANDLE ready, HANDLE done, Command value) {
+void command(Shared* shared, HANDLE ready, HANDLE done, HANDLE process, Command value) {
   InterlockedExchange(&shared->control.status, NotReady);
   InterlockedExchange(&shared->control.command, value);
   SetEvent(ready);
-  if (WaitForSingleObject(done, 30000) != WAIT_OBJECT_0) throw std::runtime_error("bridge response timeout");
+  HANDLE waits[] = { done, process };
+  const DWORD result = WaitForMultipleObjects(2, waits, FALSE, 30000);
+  if (result == WAIT_OBJECT_0 + 1) {
+    DWORD exitCode = STILL_ACTIVE;
+    GetExitCodeProcess(process, &exitCode);
+    throw std::runtime_error("bridge helper exited before response: " + std::to_string(exitCode));
+  }
+  if (result != WAIT_OBJECT_0) throw std::runtime_error("bridge response timeout");
   if (InterlockedCompareExchange(&shared->control.status, NotReady, NotReady) != Ok)
     throw std::runtime_error("bridge helper rejected command");
 }
@@ -57,15 +64,15 @@ int wmain() {
     Handle processHandle{process.hProcess}, threadHandle{process.hThread};
     std::vector<Triangle> triangles; fixture(triangles);
     shared->control.triangleCount = uint32_t(triangles.size()); std::copy(triangles.begin(), triangles.end(), shared->triangles);
-    command(shared, ready.value, done.value, UploadScene);
+    command(shared, ready.value, done.value, processHandle.value, UploadScene);
     shared->control.width = 96; shared->control.height = 64;
     shared->control.current = Camera{}; shared->control.current.aspect = 96.0f / 64.0f;
     shared->control.other = shared->control.current; shared->control.other.origin.y = .25f;
-    command(shared, ready.value, done.value, Render);
+    command(shared, ready.value, done.value, processHandle.value, Render);
     if (shared->control.outputBytes != 96u * 64u * 4u) throw std::runtime_error("invalid RT output size");
     size_t lit = 0; for (size_t i = 0; i < shared->control.outputBytes; i += 4) if (shared->output[i] || shared->output[i+1] || shared->output[i+2]) ++lit;
     if (lit < 1000) throw std::runtime_error("RT helper returned an empty image");
-    command(shared, ready.value, done.value, Stop);
+    command(shared, ready.value, done.value, processHandle.value, Stop);
     WaitForSingleObject(processHandle.value, 30000);
     DWORD helperExit = STILL_ACTIVE;
     GetExitCodeProcess(processHandle.value, &helperExit);

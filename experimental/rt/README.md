@@ -28,6 +28,24 @@ cmake --build build-rt-x64 --config Release --parallel 4
 build-rt-x64/Release/rt_test.exe --output artifacts/rt-test
 ```
 
+The cross-bitness proof uses a 32-bit client and a 64-bit helper. Build both
+architectures, place `rt_bridge_client.exe` and the x64 `rt_helper.exe` in the
+same temporary directory, and run the client:
+
+```powershell
+cmake --build build-rt-x64 --config Release --target rt_helper --parallel 4
+cmake --build build-rt-x86 --config Release --target rt_bridge_client --parallel 4
+New-Item -ItemType Directory -Force bridge-run | Out-Null
+Copy-Item build-rt-x86/Release/rt_bridge_client.exe bridge-run/
+Copy-Item build-rt-x64/Release/rt_helper.exe bridge-run/
+& .\bridge-run\rt_bridge_client.exe
+```
+
+`rt_bridge_client` creates a named shared mapping and events, uploads a small
+triangle scene from a 32-bit process, then asks the 64-bit helper to execute
+the real Vulkan RT shader. A `PASS cross-bitness RT bridge` result proves the
+process boundary and GPU result path, not L4D2 integration.
+
 The hardware test returns `77` only when no Vulkan device exposes the required
 ray-query, acceleration-structure, buffer-address, and storage-image features.
 It does not silently fall back to CPU tracing.
@@ -41,5 +59,7 @@ process, so a 32-bit `d3d9.dll` cannot create a Vulkan ray-tracing device on
 this driver. The game integration therefore needs a 64-bit helper/renderer
 boundary (with explicit external-memory and semaphore ownership) before its
 swapchain can be replaced. The current target deliberately stops at the
-hardware proof point instead of pretending that a 32-bit capability gate is
-game ray tracing.
+hardware and bridge proof point instead of pretending that a 32-bit capability
+gate is game ray tracing. The next integration step is to feed DXVK's captured
+scene/camera data into this helper and copy its result into the normal DXVK
+present path; that work is not yet enabled by default.
