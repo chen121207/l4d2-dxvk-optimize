@@ -203,8 +203,11 @@ Scene::Scene(Device& d, const std::vector<Triangle>& mesh) : impl(std::make_uniq
     throw std::runtime_error("RT mesh outside safety/device limits");
   if (d.limits.maxPushConstantsSize < 128 || d.limits.maxPerStageDescriptorStorageImages < 4)
     throw std::runtime_error("Insufficient RT pipeline limits");
-  auto& s = *impl;
-  std::vector<Vec3> points; points.reserve(mesh.size()*3);
+  // D3D9 streams commonly contain zero-area UI/particle primitives. They are
+  // legal to submit to the rasterizer but Vulkan acceleration structures reject
+  // them. Drop only those triangles instead of rejecting the whole frame.
+  std::vector<Triangle> filtered;
+  filtered.reserve(mesh.size());
   for (const auto& t : mesh) {
     if (!t.id) throw std::runtime_error("Object ID 0 is reserved for invalid/miss pixels");
     for (const auto p : {t.a,t.b,t.c,t.albedo})
@@ -212,15 +215,20 @@ Scene::Scene(Device& d, const std::vector<Triangle>& mesh) : impl(std::make_uniq
         throw std::runtime_error("Nonfinite triangle");
     Vec3 a{t.b.x-t.a.x,t.b.y-t.a.y,t.b.z-t.a.z}, b{t.c.x-t.a.x,t.c.y-t.a.y,t.c.z-t.a.z};
     Vec3 n{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};
-    if (n.x*n.x+n.y*n.y+n.z*n.z < 1e-12f) throw std::runtime_error("Degenerate triangle");
-    points.insert(points.end(), {t.a,t.b,t.c});
+    if (n.x*n.x+n.y*n.y+n.z*n.z < 1e-12f) continue;
+    filtered.push_back(t);
   }
+  if (filtered.empty()) throw std::runtime_error("RT scene contains no non-degenerate triangles");
+  auto& s = *impl;
+  std::vector<Vec3> points; points.reserve(filtered.size()*3);
+  for (const auto& t : filtered)
+    points.insert(points.end(), {t.a,t.b,t.c});
   const VkBufferUsageFlags inputUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
     | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
   s.vertices = std::make_unique<Buffer>(d, points.size()*sizeof(Vec3), inputUsage, true);
   std::memcpy(s.vertices->mapped, points.data(), size_t(s.vertices->size));
-  s.triangles = std::make_unique<Buffer>(d, mesh.size()*sizeof(Triangle), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
-  std::memcpy(s.triangles->mapped, mesh.data(), size_t(s.triangles->size));
+  s.triangles = std::make_unique<Buffer>(d, filtered.size()*sizeof(Triangle), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+  std::memcpy(s.triangles->mapped, filtered.data(), size_t(s.triangles->size));
   auto& g = s.blas.geometry;
   g.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR; g.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
   g.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
@@ -228,7 +236,7 @@ Scene::Scene(Device& d, const std::vector<Triangle>& mesh) : impl(std::make_uniq
   g.geometry.triangles.vertexData.deviceAddress = s.vertices->address();
   g.geometry.triangles.vertexStride = sizeof(Vec3); g.geometry.triangles.maxVertex = uint32_t(points.size()-1);
   g.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-  s.blas.create(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, uint32_t(mesh.size()));
+  s.blas.create(VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, uint32_t(filtered.size()));
   VkAccelerationStructureDeviceAddressInfoKHR ai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
   ai.accelerationStructure = s.blas.handle;
   VkAccelerationStructureInstanceKHR instance{};

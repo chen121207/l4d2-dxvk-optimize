@@ -19,6 +19,21 @@ namespace dxvk {
     float* motion(uint8_t* base) { return reinterpret_cast<float*>(base + MotionOffset); }
     uint32_t* objectId(uint8_t* base) { return reinterpret_cast<uint32_t*>(base + ObjectIdOffset); }
 
+    uint64_t hashTriangles(const std::vector<Triangle>& values) {
+      // FNV-1a is deliberately used only as a change detector. A collision
+      // merely causes one frame to reuse the previous acceleration structure.
+      uint64_t hash = 1469598103934665603ull;
+      const auto* bytes = reinterpret_cast<const uint8_t*>(values.data());
+      const size_t size = values.size() * sizeof(Triangle);
+      for (size_t i = 0; i < size; i++) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+      }
+      hash ^= values.size();
+      hash *= 1099511628211ull;
+      return hash;
+    }
+
 
     std::wstring processDirectory() {
       wchar_t path[MAX_PATH] = {};
@@ -46,11 +61,14 @@ namespace dxvk {
 
   void D3D9RtBridge::beginFrame() {
     m_triangles.clear();
+    m_triangleOverflow = false;
   }
 
   void D3D9RtBridge::append(const dxvk::rt::bridge::Triangle& triangle) {
     if (m_triangles.size() < MaxTriangles)
       m_triangles.push_back(triangle);
+    else
+      m_triangleOverflow = true;
   }
 
   std::wstring D3D9RtBridge::helperPath() const {
@@ -91,6 +109,7 @@ namespace dxvk {
     control(m_shared)->magic = Magic;
     control(m_shared)->version = Version;
     control(m_shared)->fgEnable = environmentPath(L"DXVK_FFG_ENABLE") == L"1" ? 1u : 0u;
+    control(m_shared)->auxEnable = environmentPath(L"DXVK_RT_AUX_READBACK") == L"1" ? 1u : 0u;
     control(m_shared)->fgAlpha = 0.5f;
     InterlockedExchange(&control(m_shared)->command, Idle);
     InterlockedExchange(&control(m_shared)->status, NotReady);
@@ -132,32 +151,46 @@ namespace dxvk {
         || width > MaxWidth || height > MaxHeight)
       return false;
 
-    control(m_shared)->triangleCount = uint32_t(m_triangles.size());
+    const uint64_t sceneHash = hashTriangles(m_triangles);
     control(m_shared)->width = width;
     control(m_shared)->height = height;
     control(m_shared)->current = current;
     control(m_shared)->other = previous;
     control(m_shared)->frameId = ++m_frameId;
-    std::memcpy(triangles(m_shared), m_triangles.data(), m_triangles.size() * sizeof(Triangle));
-    if (!send(UploadScene))
-      return false;
+    if (!m_sceneUploaded || sceneHash != m_sceneHash
+        || m_sceneTriangleCount != m_triangles.size()) {
+      control(m_shared)->triangleCount = uint32_t(m_triangles.size());
+      std::memcpy(triangles(m_shared), m_triangles.data(), m_triangles.size() * sizeof(Triangle));
+      if (!send(UploadScene))
+        return false;
+      m_sceneHash = sceneHash;
+      m_sceneTriangleCount = uint32_t(m_triangles.size());
+      m_sceneUploaded = true;
+    }
     if (!send(Render))
       return false;
 
     const size_t pixels = size_t(width) * height;
+    const bool auxiliary = control(m_shared)->auxEnable != 0;
     if (control(m_shared)->outputBytes != pixels * 4
-        || control(m_shared)->depthBytes != pixels * sizeof(float)
-        || control(m_shared)->motionBytes != pixels * sizeof(float) * 2
-        || control(m_shared)->objectIdBytes != pixels * sizeof(uint32_t))
+        || (auxiliary && (control(m_shared)->depthBytes != pixels * sizeof(float)
+          || control(m_shared)->motionBytes != pixels * sizeof(float) * 2
+          || control(m_shared)->objectIdBytes != pixels * sizeof(uint32_t))))
       return false;
 
     output.width = width;
     output.height = height;
     output.frameId = control(m_shared)->frameId;
     output.color.assign(outputPixels(m_shared), outputPixels(m_shared) + pixels * 4);
-    output.depth.assign(depth(m_shared), depth(m_shared) + pixels);
-    output.motion.assign(motion(m_shared), motion(m_shared) + pixels * 2);
-    output.objectId.assign(objectId(m_shared), objectId(m_shared) + pixels);
+    if (auxiliary) {
+      output.depth.assign(depth(m_shared), depth(m_shared) + pixels);
+      output.motion.assign(motion(m_shared), motion(m_shared) + pixels * 2);
+      output.objectId.assign(objectId(m_shared), objectId(m_shared) + pixels);
+    } else {
+      output.depth.clear();
+      output.motion.clear();
+      output.objectId.clear();
+    }
     return true;
   }
 
@@ -177,6 +210,10 @@ namespace dxvk {
     if (m_done) { CloseHandle(m_done); m_done = nullptr; }
     if (m_ready) { CloseHandle(m_ready); m_ready = nullptr; }
     if (m_mapping) { CloseHandle(m_mapping); m_mapping = nullptr; }
+    m_sceneUploaded = false;
+    m_sceneHash = 0;
+    m_sceneTriangleCount = 0;
+    m_triangleOverflow = false;
   }
 
 }

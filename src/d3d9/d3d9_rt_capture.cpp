@@ -23,6 +23,7 @@ namespace dxvk {
       const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
       return length > 1e-6f ? Vec3 { value.x / length, value.y / length, value.z / length } : Vec3 {};
     }
+
   }
 
   void D3D9DeviceEx::RtBeginFrame() {
@@ -69,6 +70,10 @@ namespace dxvk {
                                    UINT indexStride, UINT startIndex, INT baseVertex) {
     if (!m_rtBridge || !m_rtBridge->available())
       return;
+    // Once the bounded bridge scene is full, do not keep walking D3D9 draws
+    // that can no longer contribute to the RT frame.
+    if (m_rtBridge->triangleCount() >= dxvk::rt::bridge::MaxTriangles)
+      return;
     if ((primitiveType != D3DPT_TRIANGLELIST
         && primitiveType != D3DPT_TRIANGLESTRIP
         && primitiveType != D3DPT_TRIANGLEFAN)
@@ -76,16 +81,23 @@ namespace dxvk {
       return;
     }
 
+    // PositionT vertices are already in screen space (HUD, text and many
+    // particles). They are not world geometry and applying the world matrix
+    // would poison the RT scene with invalid triangles.
+    if (m_state.vertexDecl->TestFlag(D3D9VertexDeclFlag::HasPositionT))
+      return;
+
     const D3DVERTEXELEMENT9* position = nullptr;
     for (const auto& element : m_state.vertexDecl->GetElements()) {
       if (element.Usage == D3DDECLUSAGE_POSITION && element.UsageIndex == 0
-          && element.Type == D3DDECLTYPE_FLOAT3) {
+          && (element.Type == D3DDECLTYPE_FLOAT3 || element.Type == D3DDECLTYPE_FLOAT4)) {
         position = &element;
         break;
       }
     }
-    if (!position || position->Stream != 0 || position->Offset + sizeof(float) * 3 > stride) {
-      m_rtIncompleteScene = true;
+    const size_t positionBytes = position && position->Type == D3DDECLTYPE_FLOAT4
+      ? sizeof(float) * 4 : sizeof(float) * 3;
+    if (!position || position->Stream != 0 || position->Offset + positionBytes > stride) {
       return;
     }
 
@@ -102,11 +114,12 @@ namespace dxvk {
       if (vertexIndex < 0 || uint64_t(vertexIndex) > (vertexBytes / stride))
         return false;
       const uint64_t offset = uint64_t(vertexOffset) + uint64_t(vertexIndex) * stride + position->Offset;
-      if (offset > vertexBytes || vertexBytes - offset < sizeof(float) * 3)
+      if (offset > vertexBytes || vertexBytes - offset < positionBytes)
         return false;
-      float coordinates[3];
-      std::memcpy(coordinates, vertices + offset, sizeof(coordinates));
-      const Vector4 transformed = world * Vector4(coordinates[0], coordinates[1], coordinates[2], 1);
+      float coordinates[4] = { 0, 0, 0, 1 };
+      std::memcpy(coordinates, vertices + offset, positionBytes);
+      const float w = position->Type == D3DDECLTYPE_FLOAT4 ? coordinates[3] : 1.0f;
+      const Vector4 transformed = world * Vector4(coordinates[0], coordinates[1], coordinates[2], w);
       if (!std::isfinite(transformed.w) || std::abs(transformed.w) < 1e-6f)
         return false;
       result = { transformed.x / transformed.w, transformed.y / transformed.w, transformed.z / transformed.w };
@@ -128,6 +141,8 @@ namespace dxvk {
     };
 
     for (uint32_t primitive = 0; primitive < primitiveCount; ++primitive) {
+      if (m_rtBridge->triangleCount() >= dxvk::rt::bridge::MaxTriangles)
+        break;
       uint32_t indices3[3];
       Vec3 points[3];
       bool valid = true;
@@ -146,7 +161,6 @@ namespace dxvk {
         std::swap(points[1], points[2]);
       }
       if (!valid) {
-        m_rtIncompleteScene = true;
         break;
       }
       dxvk::rt::bridge::Triangle triangle;
@@ -163,7 +177,7 @@ namespace dxvk {
     const auto& stream = m_state.vertexBuffers[0];
     D3D9CommonBuffer* buffer = GetCommonBuffer(stream.vertexBuffer);
     const auto allocation = buffer ? buffer->GetMappedSlice() : nullptr;
-    if (!buffer || !allocation || buffer->NeedsReadback()) { m_rtIncompleteScene = true; return; }
+    if (!buffer || !allocation || buffer->NeedsReadback()) return;
     RtCaptureDraw(type, count, static_cast<const uint8_t*>(allocation->mapPtr()),
       buffer->Desc()->Size, stream.stride, stream.offset, nullptr, 0, 0, startVertex, 0);
   }
@@ -178,11 +192,11 @@ namespace dxvk {
     const auto indices = indexBuffer ? indexBuffer->GetMappedSlice() : nullptr;
     if (!vertexBuffer || !indexBuffer || !vertices || !indices
         || vertexBuffer->NeedsReadback() || indexBuffer->NeedsReadback()) {
-      m_rtIncompleteScene = true; return;
+      return;
     }
     const auto format = static_cast<D3DFORMAT>(indexBuffer->Desc()->Format);
     const uint32_t indexStride = format == D3DFMT_INDEX16 ? 2 : format == D3DFMT_INDEX32 ? 4 : 0;
-    if (!indexStride) { m_rtIncompleteScene = true; return; }
+    if (!indexStride) return;
     RtCaptureDraw(type, count, static_cast<const uint8_t*>(vertices->mapPtr()),
       vertexBuffer->Desc()->Size, stream.stride, stream.offset,
       static_cast<const uint8_t*>(indices->mapPtr()), indexBuffer->Desc()->Size,
@@ -203,7 +217,7 @@ namespace dxvk {
                                                   const void* vertices, UINT stride) {
     if (!m_rtBridge || !m_rtBridge->available()) return;
     const uint32_t indexStride = format == D3DFMT_INDEX16 ? 2 : format == D3DFMT_INDEX32 ? 4 : 0;
-    if (!indexStride) { m_rtIncompleteScene = true; return; }
+    if (!indexStride) return;
     RtCaptureDraw(type, count, static_cast<const uint8_t*>(vertices),
       size_t(minVertex + numVertices) * stride, stride, 0,
       static_cast<const uint8_t*>(indices), size_t(count) * 3 * indexStride,
@@ -211,7 +225,9 @@ namespace dxvk {
   }
 
   bool D3D9DeviceEx::RtRenderFrame(uint32_t width, uint32_t height, D3D9RtBridge::Output& output) {
-    if (!m_rtBridge || !m_rtBridge->available() || !m_rtHasCamera || m_rtIncompleteScene)
+    if (!m_rtBridge || !m_rtBridge->available() || !m_rtHasCamera
+        || m_rtBridge->sceneOverflowed()
+        || m_rtBridge->triangleCount() < dxvk::rt::bridge::MinTrianglesForFrame)
       return false;
     const dxvk::rt::bridge::Camera previous = m_rtHasPreviousCamera ? m_rtPreviousCamera : m_rtCamera;
     const bool success = m_rtBridge->render(width, height, m_rtCamera, previous, output);
@@ -227,8 +243,21 @@ namespace dxvk {
     if (!image || color.size() != size_t(width) * height * 4)
       return false;
 
+    // L4D2's normal swapchain is commonly BGRA8 even though the helper's wire
+    // format is RGBA8. Keep the helper API stable and swizzle only at this
+    // final copy, otherwise the RT result has reversed red/blue channels.
+    const bool bgra = image->info().format == VK_FORMAT_B8G8R8A8_UNORM
+                   || image->info().format == VK_FORMAT_B8G8R8A8_SRGB;
+    std::vector<uint8_t> uploadColor = color;
+    if (bgra) {
+      for (size_t i = 0; i < uploadColor.size(); i += 4)
+        std::swap(uploadColor[i + 0], uploadColor[i + 2]);
+    }
+    const VkFormat uploadFormat = bgra
+      ? VK_FORMAT_B8G8R8A8_UNORM : VK_FORMAT_R8G8B8A8_UNORM;
+
     DxvkBufferCreateInfo info;
-    info.size = color.size();
+    info.size = uploadColor.size();
     info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     info.stages = VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
     info.access = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
@@ -239,15 +268,16 @@ namespace dxvk {
     void* mapped = buffer->mapPtr(0);
     if (!mapped)
       return false;
-    std::memcpy(mapped, color.data(), color.size());
+    std::memcpy(mapped, uploadColor.data(), uploadColor.size());
 
     // Complete the game's queued draws before injecting the replacement color.
     FlushCsChunk();
     InjectCs([
       cImage = image,
-      cBuffer = std::move(buffer)
+      cBuffer = std::move(buffer),
+      cFormat = uploadFormat
     ] (DxvkContext* ctx) mutable {
-      ctx->uploadImage(cImage, cBuffer, 0, 4, VK_FORMAT_R8G8B8A8_UNORM);
+      ctx->uploadImage(cImage, cBuffer, 0, 4, cFormat);
     });
     return true;
   }

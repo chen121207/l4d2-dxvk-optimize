@@ -28,6 +28,8 @@ namespace dxvk {
     D3D9RtBridge& operator=(const D3D9RtBridge&) = delete;
 
     bool available() const { return m_process != nullptr && m_shared != nullptr; }
+    size_t triangleCount() const { return m_triangles.size(); }
+    bool sceneOverflowed() const { return m_triangleOverflow; }
     void beginFrame();
     void append(const dxvk::rt::bridge::Triangle& triangle);
     bool render(uint32_t width, uint32_t height,
@@ -47,6 +49,10 @@ namespace dxvk {
     std::wstring m_doneName;
     std::vector<dxvk::rt::bridge::Triangle> m_triangles;
     uint64_t m_frameId = 0;
+    uint64_t m_sceneHash = 0;
+    uint32_t m_sceneTriangleCount = 0;
+    bool m_sceneUploaded = false;
+    bool m_triangleOverflow = false;
     bool m_loggedUnavailable = false;
 
     bool start();

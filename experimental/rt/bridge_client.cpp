@@ -17,6 +17,12 @@ void fixture(std::vector<Triangle>& triangles) {
   };
   quad({10, -30, -30}, {10, 30, -30}, {10, 30, 30}, {10, -30, 30}, 1);
   quad({5, -1, -1}, {5, 1, -1}, {5, 1, 1}, {5, -1, 1}, 2);
+  // D3D9 permits zero-area submissions (notably in UI/particle streams).
+  // The helper must discard them without rejecting the complete scene.
+  Triangle degenerate{};
+  degenerate.a = degenerate.b = degenerate.c = {2, 0, 0};
+  degenerate.id = 99;
+  triangles.push_back(degenerate);
 }
 void command(Shared* shared, HANDLE ready, HANDLE done, HANDLE process, Command value) {
   InterlockedExchange(&shared->control.status, NotReady);
@@ -53,6 +59,7 @@ int wmain() {
     wchar_t ffgEnabled[8]{};
     shared->control.fgEnable = GetEnvironmentVariableW(L"L4D2_RT_TEST_FFG", ffgEnabled, 8)
       && std::wstring(ffgEnabled) == L"1" ? 1u : 0u;
+    shared->control.auxEnable = 1u;
     shared->control.fgAlpha = 0.5f;
     InterlockedExchange(&shared->control.command, Idle);
     InterlockedExchange(&shared->control.status, NotReady);

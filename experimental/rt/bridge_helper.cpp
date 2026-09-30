@@ -243,8 +243,14 @@ int wmain(int argc, wchar_t** argv) {
             writeOutput(shared, host.read(*ffgOutput, 16), width, height);
           else
             writeOutput(shared, host.read(*frame->images[0], 16), width, height);
-          writeAuxiliary(shared, host.read(*frame->images[1], 4), host.read(*frame->images[2], 8),
-            host.read(*frame->images[3], 4), width, height);
+          if (shared->control.auxEnable) {
+            writeAuxiliary(shared, host.read(*frame->images[1], 4), host.read(*frame->images[2], 8),
+              host.read(*frame->images[3], 4), width, height);
+          } else {
+            shared->control.depthBytes = 0;
+            shared->control.motionBytes = 0;
+            shared->control.objectIdBytes = 0;
+          }
           std::swap(frame, previousFrame);
           havePrevious = true;
           setStatus(shared, Ok);

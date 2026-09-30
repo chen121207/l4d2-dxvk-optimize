@@ -19,6 +19,15 @@ The x86 DXVK side now captures supported D3D9 triangle draws and camera data,
 while the x64 helper owns BLAS/TLAS construction and Vulkan submission. The
 optional FFG Vulkan runtime is loaded in that helper and consumes two
 consecutive GPU frames through the FGDS Color/Depth/Motion/Object-ID contract.
+The D3D9 present path requests only Color by default; set
+`DXVK_RT_AUX_READBACK=1` when a diagnostic CPU readback of the auxiliary FGDS
+images is explicitly needed. The helper filters zero-area D3D9 primitives and
+keeps a stable scene acceleration structure when captured geometry is
+unchanged, avoiding the old per-frame BLAS/TLAS rebuild and three unnecessary
+auxiliary readback fences.
+Screen-space `POSITIONT` draws are excluded from the world scene, and the
+present path declines RT replacement when the capture overflows its bounded
+triangle budget or contains too little geometry to represent a world frame.
 
 ## Build and run
 

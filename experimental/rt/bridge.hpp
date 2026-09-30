@@ -6,8 +6,12 @@
 
 namespace dxvk::rt::bridge {
 constexpr uint32_t Magic = 0x3254524Cu; // L4RT
-constexpr uint32_t Version = 3;
+constexpr uint32_t Version = 4;
 constexpr uint32_t MaxTriangles = 250000;
+// A few triangles can come from menus, particles, or debug overlays. Do not
+// replace a complete raster frame with a sparse RT scene unless a reasonable
+// amount of world geometry was captured.
+constexpr uint32_t MinTrianglesForFrame = 128;
 constexpr uint32_t MaxWidth = 1920;
 constexpr uint32_t MaxHeight = 1080;
 // Keep the wire protocol independent of the Vulkan implementation headers.
@@ -44,6 +48,9 @@ struct Control {
   uint32_t objectIdBytes = 0;
   uint64_t frameId = 0;
   uint32_t fgEnable = 0;
+  // The D3D9 side only needs color for the present path. Auxiliary images are
+  // opt-in until a native FGDS consumer asks for a CPU readback.
+  uint32_t auxEnable = 0;
   float fgAlpha = 0.5f;
   Camera current{};
   Camera other{};
