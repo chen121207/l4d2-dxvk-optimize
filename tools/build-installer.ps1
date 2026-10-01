@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $project = Split-Path $repo -Parent
-$version = '0.1.2'
+$version = '0.1.3'
 if (-not $DxvkDll) { $DxvkDll = Join-Path $repo 'build-msvc-x86\src\d3d9\d3d9.dll' }
 if (-not $RtHelper) { $RtHelper = Join-Path $repo 'build-rt-x64\Release\rt_helper.exe' }
 if (-not $FfgDll) { $FfgDll = Join-Path $project 'FreeFrameGen\build-vulkan\Release\FreeFrameGenVulkan.dll' }
@@ -38,6 +38,16 @@ $output = Join-Path $OutputDirectory ('L4D2-DXVK-RT-Setup-' + $version + '.exe')
 if (Test-Path -LiteralPath $output) { throw "Output exists; choose a fresh -OutputDirectory: $output" }
 
 $work = Join-Path $env:TEMP ('l4d2-dxvk-installer-' + [Guid]::NewGuid().ToString('N'))
+$launcherSource = Join-Path $repo 'installer\L4D2DxvkRtLauncher.cs'
+$launcherExe = Join-Path $work 'L4D2-DXVK-RT.exe'
+[void](New-Item -ItemType Directory -Path $work -Force)
+if (-not (Test-Path -LiteralPath $launcherSource -PathType Leaf)) { throw "Missing launcher source: $launcherSource" }
+$launcherArguments = @('/nologo','/target:winexe','/platform:x64','/optimize+','/warn:4','/warnaserror+','/codepage:65001',
+    '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:System.Xml.dll',
+    ('/out:' + $launcherExe), $launcherSource)
+& $compiler @launcherArguments
+if ($LASTEXITCODE) { throw 'Launcher compilation failed' }
+Assert-PeMachine $launcherExe 0x8664
 $payload = Join-Path $work 'payload'
 [void](New-Item -ItemType Directory -Path (Join-Path $payload 'bin') -Force)
 [void](New-Item -ItemType Directory -Path (Join-Path $payload 'tools') -Force)
@@ -48,6 +58,7 @@ Copy-Item -LiteralPath $FfgDll -Destination (Join-Path $payload 'bin\FreeFrameGe
 Copy-Item -LiteralPath (Join-Path $repo 'installer\dxvk.conf') -Destination (Join-Path $payload 'dxvk.conf')
 Copy-Item -LiteralPath (Join-Path $repo 'installer\README.txt') -Destination (Join-Path $payload 'README.txt')
 Copy-Item -LiteralPath (Join-Path $repo 'installer\Launch-Offline.ps1') -Destination (Join-Path $payload 'tools\Launch-Offline.ps1')
+Copy-Item -LiteralPath $launcherExe -Destination (Join-Path $payload 'L4D2-DXVK-RT.exe')
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = Join-Path $work 'payload.zip'
@@ -66,7 +77,7 @@ try {
         $entries += '        { ' + (CsString $relative) + ', ' + (CsString $hash) + ' },'
     }
 } finally { $zip.Dispose() }
-if ($entries.Count -ne 6) { throw 'Unexpected payload file count' }
+if ($entries.Count -ne 7) { throw 'Unexpected payload file count' }
 $generated = @"
 using System;
 using System.Collections.Generic;

@@ -5,13 +5,14 @@ using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.1.3.0")]
+[assembly: AssemblyFileVersion("0.1.3.0")]
 
 // Product.g.cs is generated from the exact payload hashes by build-installer.ps1.
 internal static class Setup
@@ -20,6 +21,10 @@ internal static class Setup
     private const string ProductId = "L4D2-DXVK-RT-Research";
     private const string Uninstaller = "uninstall.exe";
     private const string Marker = "install-state.txt";
+    private const string MainProgram = "L4D2-DXVK-RT.exe";
+    private const string StartMenuFolder = "L4D2 DXVK RT";
+    private const string StartMenuShortcut = "L4D2 DXVK RT.lnk";
+    private const string DesktopShortcut = "L4D2 DXVK RT.lnk";
     private const string RegPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\" + ProductId;
     private static string Self { get { return Assembly.GetExecutingAssembly().Location; } }
     private static string DefaultRoot { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", Folder); } }
@@ -109,7 +114,17 @@ internal static class Setup
 
     private static string Quote(string s) { return "\"" + s.Replace("\"", "") + "\""; }
     private static bool Same(string a, string b) { return string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
-    private static void WriteLog(string path, string line) { if (path != null) File.AppendAllText(path, DateTime.UtcNow.ToString("o") + " " + line + Environment.NewLine); }
+    private static void WriteLog(string path, string line)
+    {
+        if (path == null) return;
+        try
+        {
+            string parent = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!String.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+            File.AppendAllText(path, DateTime.UtcNow.ToString("o") + " " + line + Environment.NewLine);
+        }
+        catch (Exception) { /* diagnostics must never turn a real result into a second failure */ }
+    }
     private static RegistryKey UserHive() { return RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64); }
     private static string RegisteredRoot()
     {
@@ -121,6 +136,27 @@ internal static class Setup
             if (string.IsNullOrEmpty(root)) throw new IOException("Installation record has no location.");
             return root;
         }
+    }
+    private static bool HasStaleRegistration()
+    {
+        using (RegistryKey hive = UserHive())
+        using (RegistryKey key = hive.OpenSubKey(RegPath))
+        {
+            if (key == null) return false;
+            string root = key.GetValue("InstallLocation") as string;
+            if (String.IsNullOrEmpty(root)) return true;
+            string marker = Path.Combine(root, Marker);
+            string uninstall = Path.Combine(root, Uninstaller);
+            // Only remove a record when the entire package location is gone.
+            // A partially damaged installation must remain user-visible so it
+            // can be repaired or manually inspected instead of being deleted.
+            return !Directory.Exists(root) && !File.Exists(marker) && !File.Exists(uninstall);
+        }
+    }
+    private static void RemoveStaleRegistration()
+    {
+        using (RegistryKey hive = UserHive())
+            hive.DeleteSubKeyTree(RegPath, false);
     }
     private static string Hash(string path)
     {
@@ -175,11 +211,107 @@ internal static class Setup
         foreach (string dir in Directory.GetDirectories(root)) RemoveEmptyTree(dir);
         if (Directory.GetFileSystemEntries(root).Length == 0) Directory.Delete(root, false);
     }
+    private static string StartMenuShortcutPath()
+    {
+        string startMenu = Environment.GetFolderPath(Environment.SpecialFolder.StartMenu);
+        return Path.Combine(startMenu, "Programs", StartMenuFolder, StartMenuShortcut);
+    }
+    private static string DesktopShortcutPath()
+    {
+        string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        return String.IsNullOrEmpty(desktop) ? null : Path.Combine(desktop, DesktopShortcut);
+    }
+    private static List<string> ShortcutPaths()
+    {
+        List<string> result = new List<string> { StartMenuShortcutPath() };
+        string desktop = DesktopShortcutPath();
+        if (!String.IsNullOrEmpty(desktop)) result.Add(desktop);
+        return result;
+    }
+    private static void SetComProperty(object target, string property, object value)
+    {
+        target.GetType().InvokeMember(property, BindingFlags.Instance | BindingFlags.Public | BindingFlags.SetProperty,
+            null, target, new object[] { value });
+    }
+    private static string GetShortcutTarget(string path)
+    {
+        if (!File.Exists(path)) return null;
+        object shell = null, shortcut = null;
+        try
+        {
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) return null;
+            shell = Activator.CreateInstance(shellType);
+            shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.Instance | BindingFlags.Public | BindingFlags.InvokeMethod,
+                null, shell, new object[] { path });
+            object value = shortcut.GetType().InvokeMember("TargetPath", BindingFlags.Instance | BindingFlags.Public | BindingFlags.GetProperty,
+                null, shortcut, null);
+            return value as string;
+        }
+        catch (Exception) { return null; }
+        finally
+        {
+            if (shortcut != null && Marshal.IsComObject(shortcut)) Marshal.FinalReleaseComObject(shortcut);
+            if (shell != null && Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
+        }
+    }
+    private static void CreateShortcut(string path, string target)
+    {
+        string existing = GetShortcutTarget(path);
+        if (File.Exists(path) && (existing == null || !Same(existing, target)))
+            throw new IOException("Shortcut already exists and points to another program: " + path);
+        string parent = Path.GetDirectoryName(path);
+        if (!String.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+        object shell = null, shortcut = null;
+        try
+        {
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) throw new IOException("Windows shortcut service is unavailable.");
+            shell = Activator.CreateInstance(shellType);
+            shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.Instance | BindingFlags.Public | BindingFlags.InvokeMethod,
+                null, shell, new object[] { path });
+            SetComProperty(shortcut, "TargetPath", target);
+            SetComProperty(shortcut, "WorkingDirectory", Path.GetDirectoryName(target));
+            SetComProperty(shortcut, "Arguments", "--start");
+            SetComProperty(shortcut, "Description", "L4D2 DXVK RT offline launcher");
+            SetComProperty(shortcut, "IconLocation", target + ",0");
+            shortcut.GetType().InvokeMember("Save", BindingFlags.Instance | BindingFlags.Public | BindingFlags.InvokeMethod,
+                null, shortcut, null);
+        }
+        finally
+        {
+            if (shortcut != null && Marshal.IsComObject(shortcut)) Marshal.FinalReleaseComObject(shortcut);
+            if (shell != null && Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
+        }
+    }
+    private static void CreateShortcuts(string root)
+    {
+        string target = Child(root, MainProgram);
+        if (!File.Exists(target)) throw new IOException("Installed main program is missing: " + target);
+        foreach (string path in ShortcutPaths()) CreateShortcut(path, target);
+    }
+    private static void RemoveShortcuts(string root)
+    {
+        string target = Path.Combine(root, MainProgram);
+        foreach (string path in ShortcutPaths())
+        {
+            if (String.Equals(GetShortcutTarget(path), target, StringComparison.OrdinalIgnoreCase))
+            {
+                try { File.Delete(path); } catch (FileNotFoundException) { }
+            }
+        }
+        string startFolder = Path.GetDirectoryName(StartMenuShortcutPath());
+        if (!String.IsNullOrEmpty(startFolder)) RemoveEmptyTree(startFolder);
+    }
     private static void Install(string root)
     {
+        if (HasStaleRegistration())
+        {
+            RemoveStaleRegistration();
+        }
         using (RegistryKey hive = UserHive())
         using (RegistryKey existing = hive.OpenSubKey(RegPath))
-            if (existing != null) throw new IOException("Already installed. Uninstall the old version first.");
+            if (existing != null) throw new IOException("Already installed. Uninstall the old version first, or choose a different package directory.");
         if (Directory.Exists(root) || File.Exists(root)) throw new IOException("Target directory already exists; nothing will be overwritten.");
         string parent = Path.GetDirectoryName(root);
         Directory.CreateDirectory(parent);
@@ -229,10 +361,12 @@ internal static class Setup
                 key.SetValue("MarkerSHA256", Hash(Child(root, Marker)));
                 key.SetValue("UninstallerSHA256", Hash(Child(root, Uninstaller)));
             }
+            CreateShortcuts(root);
         }
         catch
         {
             if (registered) using (RegistryKey hive = UserHive()) hive.DeleteSubKeyTree(RegPath, false);
+            RemoveShortcuts(root);
             string owned = moved ? root : stage;
             if (Directory.Exists(owned))
             {
@@ -266,6 +400,7 @@ internal static class Setup
         foreach (Process p in Process.GetProcessesByName("left4dead2"))
             using (p) throw new IOException("Close L4D2 before uninstalling the runtime.");
         VerifyPayload(root);
+        RemoveShortcuts(root);
         using (FileStream locked = new FileStream(uninstall, FileMode.Open, FileAccess.Read, FileShare.None)) { }
         foreach (KeyValuePair<string, string> item in Product.Manifest) File.Delete(Child(root, item.Key));
         File.Delete(uninstall);
