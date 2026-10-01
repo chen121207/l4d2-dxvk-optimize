@@ -90,7 +90,20 @@ Image::~Image() {
   if (handle) device->vkDestroyImage(device->handle, handle, nullptr);
   if (memory) device->vkFreeMemory(device->handle, memory, nullptr);
 }
-FgdsVkImage Image::fgds() const { return {encode(handle), encode(view), uint32_t(format), VK_IMAGE_LAYOUT_GENERAL}; }
+namespace {
+uint32_t fgdsFormat(VkFormat format) {
+  switch (format) {
+  case VK_FORMAT_R32G32B32A32_SFLOAT: return FGDS_VK_FORMAT_RGBA32_FLOAT;
+  case VK_FORMAT_R32_SFLOAT: return FGDS_VK_FORMAT_R32_FLOAT;
+  case VK_FORMAT_R32G32_SFLOAT: return FGDS_VK_FORMAT_RG32_FLOAT;
+  case VK_FORMAT_R32_UINT: return FGDS_VK_FORMAT_R32_UINT;
+  default: throw std::runtime_error("RT image format is not representable by FGDS Vulkan");
+  }
+}
+}
+FgdsVkImage Image::fgds() const {
+  return {encode(handle), encode(view), fgdsFormat(format), VK_IMAGE_LAYOUT_GENERAL};
+}
 Frame::Frame(Device& d, uint32_t w, uint32_t h) {
   constexpr VkFormat formats[] = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32_SFLOAT,
     VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32_UINT};
@@ -127,6 +140,18 @@ FgdsVkFrame Frame::metadata(uint64_t id, uint64_t timeNs, const Camera& c) const
     x.y,y.y,c.forward.y*zScale,c.forward.y, x.z,y.z,c.forward.z*zScale,c.forward.z,
     -dot(x,c.origin),-dot(y,c.origin),(-dot(c.forward,c.origin)-.01f)*zScale,-dot(c.forward,c.origin)};
   std::copy(std::begin(matrix), std::end(matrix), f.worldToClip);
+  return f;
+}
+FgdsVkFrameV2 Frame::metadataV2(uint64_t id, uint64_t timeNs, const Camera& c) const {
+  FgdsVkFrameV2 f{};
+  const auto legacy = metadata(id, timeNs, c);
+  static_assert(sizeof(FgdsVkFrameV2) == sizeof(FgdsVkFrame) + 8,
+    "FGDS V2 must append resource flags to the frozen V1 frame");
+  std::memcpy(&f, &legacy, sizeof(legacy));
+  f.structSize = sizeof(f);
+  f.version = FGDS_VK_VERSION_0_2;
+  f.resourceFlags = FGDS_VK_RESOURCE_CORE;
+  f.reserved3 = 0;
   return f;
 }
 void memoryBarrier(Device& d, VkCommandBuffer cmd, VkPipelineStageFlags source, VkAccessFlags sourceAccess,

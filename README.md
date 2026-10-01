@@ -30,6 +30,8 @@ adds an opt-in RT bridge for research.
 * **FGDS/FFG hand-off / FGDS/FFG 接口** — the helper can produce Color, Depth,
   Motion Vector and Object ID data for the independent
   [FreeFrameGen (FFG)](https://github.com/chen121207/FreeFrameGen) runtime.
+  The helper negotiates the frozen FGDS V2 Vulkan ABI and records FFG compute
+  on the same Vulkan device as the helper's RT images.
 * **Offline launcher / 离线启动器** — the installer provides a launcher that
   selects the L4D2 directory once, stores it per user, and starts a temporary
   `-insecure` session without permanently replacing game DLLs.
@@ -114,6 +116,41 @@ and optional FFG runtime.
 光追。关闭时明确走 DXVK 原生 Vulkan 栅格路线；开启时只有满足条件的绘制
 才会送入助手，失败时安全回退到栅格帧。
 
+## Native FGDS mode / 原生 FGDS 模式
+
+The word **native** here has a precise scope. FFG's Vulkan ABI records a
+compute pass into a caller-owned command buffer and requires the input images,
+device and queue family to belong to the same process/device. The current
+bridge therefore provides **helper-native FFG**: `rt_helper.exe` owns the
+Vulkan images, negotiates capabilities with `ffgVkGetCapabilities`, submits
+`FgdsVkPairV2` with the required Color/Depth/Motion/Object-ID flags, and calls
+`ffgVkRecordV2` in the same command buffer as the RT pass. The final helper
+result is still read back through the existing x86/x64 bridge so DXVK can
+present it.
+
+“Game-native” FFG (the L4D2 x86 DXVK process calling the runtime directly) is
+not enabled by this release. It needs an x86 FFG Vulkan DLL, DXVK-owned typed
+storage images in the four FGDS formats, a command-buffer integration point,
+and real raster motion/object-ID resources. Loading the x64 helper DLL from
+the game process or passing its Vulkan handles across shared memory would not
+meet the FGDS native contract. The standalone bridge smoke test and
+`rt_helper.log` identify the negotiated protocol as `protocol=V2`; that proves
+helper-native protocol compatibility, not full L4D2 game-native frame
+generation.
+
+当前“原生”有明确边界：FFG Vulkan ABI 要求输入图像、VkDevice、队列族和命令
+缓冲在同一进程/同一设备中。现版本实现的是**助手进程内原生 FFG**：64 位
+`rt_helper.exe` 自己创建 RT 的 Color/Depth/Motion/Object-ID 图像，协商
+`ffgVkGetCapabilities`，使用带 CORE 资源位的 `FgdsVkPairV2`，并在同一个
+Vulkan command buffer 中调用 `ffgVkRecordV2`。助手最后仍通过已有的 x86/x64
+桥接回传结果给 DXVK Present。
+
+这还不是“游戏进程内原生 FFG”。后者需要 Win32 x86 的 FFG Vulkan DLL、DXVK
+自己维护的四类 FGDS typed storage image、命令缓冲切入点，以及真实的栅格
+Motion/Object-ID 资源。不能把 x64 DLL 加载进 L4D2，或把 helper 的 Vulkan
+句柄直接塞进共享内存来冒充原生。smoke 测试日志中的 `protocol=V2` 只证明
+助手侧原生协议兼容，不代表 L4D2 已完成游戏内原生插帧。
+
 ## Current RT and FFG status / 当前 RT 与 FFG 状态
 
 The standalone RT lab is a real GPU implementation, not a CPU ray-tracing
@@ -130,8 +167,9 @@ The in-game path is still an integration prototype:
   not proven;
 * the shared-memory bridge adds synchronization and copy cost, so performance
   can be lower than plain DXVK;
-* FFG input is experimental and does not yet guarantee image quality, latency,
-  or frame pacing in every scene;
+* helper-native FFG now uses the negotiated V2 protocol and correct protocol
+  format IDs; it still does not guarantee image quality, latency, or frame
+  pacing in every scene;
 * DLSS, a production compositor, and a final user-facing RT quality menu are
   not part of this release.
 

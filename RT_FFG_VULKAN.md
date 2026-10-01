@@ -18,9 +18,19 @@ test also proves the x86-to-x64 process boundary and the optional second-frame
 FFG record path.
 
 The Vulkan FGDS ABI is mirrored in include/fgds/fgds_vk.h and the FreeFrameGen
-repository. The helper constructs two `FgdsVkFrame` records from consecutive RT
-frames and, when `DXVK_FFG_ENABLE=1`, calls the dynamically loaded
-`ffgVkRecord` compute runtime without taking device or queue ownership.
+repository. The helper maps its typed Vulkan formats to the protocol IDs,
+queries `ffgVkGetCapabilities`, and prefers the append-only V2 contract with
+CORE resource flags and `ffgVkRecordV2`. It constructs two frame records from
+consecutive RT frames and records the reverse-motion pass for the older
+endpoint, as required by the bidirectional-motion rule. A runtime exposing
+only the frozen V1 entry points remains supported as a compatibility fallback.
+
+This is helper-native FFG: both the RT images and FFG command recording are on
+the helper's Vulkan device. The final result still crosses the existing
+x86-to-x64 CPU bridge. It is not game-native FFG. A true in-process path needs
+an x86 FFG DLL, DXVK-owned RGBA32F/R32F/RG32F/R32UI storage images, a command
+buffer integration point, and raster motion/Object-ID resources. The x64 FFG
+DLL must not be loaded into the 32-bit L4D2 process.
 
 The RTX 3050 probe exposes these RT extensions to a 64-bit process but not to
 a 32-bit process. Since L4D2 is 32-bit, the helper boundary is required on

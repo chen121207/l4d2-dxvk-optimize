@@ -19,6 +19,10 @@ The x86 DXVK side now captures supported D3D9 triangle draws and camera data,
 while the x64 helper owns BLAS/TLAS construction and Vulkan submission. The
 optional FFG Vulkan runtime is loaded in that helper and consumes two
 consecutive GPU frames through the FGDS Color/Depth/Motion/Object-ID contract.
+The helper negotiates FGDS V2 (`ffgVkGetCapabilities` + `ffgVkRecordV2`) and
+maps Vulkan formats to FGDS protocol IDs rather than passing raw `VkFormat`
+enum values. It also records a reverse-motion RT pass for the older endpoint,
+so the pair satisfies FGDS's old->new/new->old bidirectional-motion rule.
 The D3D9 present path requests only Color by default; set
 `DXVK_RT_AUX_READBACK=1` when a diagnostic CPU readback of the auxiliary FGDS
 images is explicitly needed. The helper filters zero-area D3D9 primitives and
@@ -57,9 +61,11 @@ triangle scene from a 32-bit process, then asks the 64-bit helper to execute
 the real Vulkan RT shader. A `PASS cross-bitness RT bridge` result proves the
 process boundary and GPU result path, not L4D2 integration.
 
-To exercise FFG, put `FreeFrameGenVulkan.dll` next to `rt_helper.exe` and set
+To exercise helper-native FFG, put `FreeFrameGenVulkan.dll` next to `rt_helper.exe` and set
 `$env:L4D2_RT_TEST_FFG = '1'` before running the client. The helper log must
-contain `FFG frame generated` after the second render.
+contain `FGDS V2 native` and `protocol=V2` after the second render. This is a
+same-device helper test, not direct FFG execution inside the 32-bit L4D2
+process.
 
 The hardware test returns `77` only when no Vulkan device exposes the required
 ray-query, acceleration-structure, buffer-address, and storage-image features.

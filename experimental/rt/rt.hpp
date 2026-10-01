@@ -95,6 +95,7 @@ struct Frame {
   Frame(Device&, uint32_t width, uint32_t height);
   void initialize(VkCommandBuffer); // Once, undefined -> GENERAL; caller submits.
   FgdsVkFrame metadata(uint64_t id, uint64_t timeNs, const Camera&) const;
+  FgdsVkFrameV2 metadataV2(uint64_t id, uint64_t timeNs, const Camera&) const;
 };
 // Caller owns Device and command buffer. Must fence-complete all uses before
 // destruction. No implicit submit, CPU ray tracing, or queue/device idle waits.

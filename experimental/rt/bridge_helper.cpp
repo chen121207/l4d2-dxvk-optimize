@@ -20,14 +20,21 @@ struct FfgVkContext;
 using FfgVkCreate = VkResult (__cdecl*)(VkPhysicalDevice, VkDevice, uint32_t,
   PFN_vkGetDeviceProcAddr, FfgVkContext**);
 using FfgVkDestroy = void (__cdecl*)(FfgVkContext*);
+using FfgVkGetCapabilities = VkResult (__cdecl*)(FfgVkContext*, FgdsVkCapabilities*);
 using FfgVkRecord = VkResult (__cdecl*)(FfgVkContext*, VkCommandBuffer,
   const FgdsVkPair*, const FgdsVkImage*);
+using FfgVkRecordV2 = VkResult (__cdecl*)(FfgVkContext*, VkCommandBuffer,
+  const FgdsVkPairV2*, const FgdsVkImage*);
 
 struct FfgRuntime {
   HMODULE module = nullptr;
   FfgVkContext* context = nullptr;
   FfgVkDestroy destroy = nullptr;
+  FfgVkGetCapabilities getCapabilities = nullptr;
   FfgVkRecord record = nullptr;
+  FfgVkRecordV2 recordV2 = nullptr;
+  FgdsVkCapabilities capabilities{};
+  bool useV2 = false;
 
   ~FfgRuntime() {
     if (context && destroy) destroy(context);
@@ -54,16 +61,46 @@ struct FfgRuntime {
     }
     auto create = reinterpret_cast<FfgVkCreate>(GetProcAddress(module, "ffgVkCreate"));
     destroy = reinterpret_cast<FfgVkDestroy>(GetProcAddress(module, "ffgVkDestroy"));
+    getCapabilities = reinterpret_cast<FfgVkGetCapabilities>(
+      GetProcAddress(module, "ffgVkGetCapabilities"));
     record = reinterpret_cast<FfgVkRecord>(GetProcAddress(module, "ffgVkRecord"));
+    recordV2 = reinterpret_cast<FfgVkRecordV2>(GetProcAddress(module, "ffgVkRecordV2"));
     if (!create || !destroy || !record || create(host.d.physical, host.d.handle, host.d.family,
       host.getDevice, &context) != VK_SUCCESS) {
       log << "FFG Vulkan runtime exported ABI is unavailable\n";
       if (module) { FreeLibrary(module); module = nullptr; }
-      context = nullptr; destroy = nullptr; record = nullptr;
+      context = nullptr; destroy = nullptr; getCapabilities = nullptr;
+      record = nullptr; recordV2 = nullptr;
       return false;
     }
-    log << "FFG Vulkan runtime initialized\n";
+    if (getCapabilities && recordV2) {
+      capabilities = {};
+      capabilities.structSize = sizeof(capabilities);
+      if (getCapabilities(context, &capabilities) == VK_SUCCESS
+          && capabilities.version >= FGDS_VK_VERSION_0_2
+          && (capabilities.requiredResources & FGDS_VK_RESOURCE_CORE)
+             == FGDS_VK_RESOURCE_CORE
+          && capabilities.colorFormat == FGDS_VK_FORMAT_RGBA32_FLOAT
+          && capabilities.depthFormat == FGDS_VK_FORMAT_R32_FLOAT
+          && capabilities.motionFormat == FGDS_VK_FORMAT_RG32_FLOAT
+          && capabilities.objectIdFormat == FGDS_VK_FORMAT_R32_UINT) {
+        useV2 = true;
+        log << "FFG Vulkan runtime initialized (FGDS V2 native, requiredResources=0x"
+          << std::hex << capabilities.requiredResources << std::dec << ")\n";
+      } else {
+        log << "FFG V2 capability negotiation failed; using frozen V1 ABI\n";
+      }
+    } else {
+      log << "FFG Vulkan runtime initialized (frozen V1 ABI)\n";
+    }
     return true;
+  }
+
+  VkResult recordPair(VkCommandBuffer commandBuffer, const FgdsVkPair& pair,
+                      const FgdsVkPairV2& pairV2, const FgdsVkImage& output) const {
+    if (useV2)
+      return recordV2(context, commandBuffer, &pairV2, &output);
+    return record(context, commandBuffer, &pair, &output);
   }
 };
 dxvk::rt::Triangle runtimeTriangle(const dxvk::rt::bridge::Triangle& source) {
@@ -162,7 +199,10 @@ int wmain(int argc, wchar_t** argv) {
     bool sceneInitialized = false;
     bool havePrevious = false;
     bool ffgOutputInitialized = false;
-    ffgAvailable = ffg.init(host, log);
+    if (shared->control.fgEnable)
+      ffgAvailable = ffg.init(host, log);
+    else
+      log << "FFG disabled by bridge control\n";
     for (;;) {
       if (WaitForSingleObject(ready.value, 30000) != WAIT_OBJECT_0)
         throw std::runtime_error("bridge command timeout");
@@ -208,8 +248,18 @@ int wmain(int argc, wchar_t** argv) {
               scene->recordBuild(commandBuffer);
               sceneInitialized = true;
             }
-            scene->recordTrace(commandBuffer, *frame,
-              runtimeCamera(shared->control.current), runtimeCamera(shared->control.other), 0);
+            const auto previousCamera = runtimeCamera(shared->control.other);
+            const auto currentCamera = runtimeCamera(shared->control.current);
+            scene->recordTrace(commandBuffer, *frame, currentCamera, previousCamera, 0);
+            // The RT kernel writes motion from the frame camera to the
+            // reference camera.  Once a second endpoint exists, refresh the
+            // previous endpoint with the reverse direction as well.  FGDS
+            // requires pair[0] old->new and pair[1] new->old; using the
+            // previous frame's old->older vector here would violate that
+            // contract even though ffgVkRecord could validate the handles.
+            if (shared->control.fgEnable && ffgAvailable && havePrevious)
+              scene->recordTrace(commandBuffer, *previousFrame,
+                previousCamera, currentCamera, 1);
             if (shared->control.fgEnable && ffgAvailable && havePrevious) {
               if (!ffgOutputInitialized) {
                 VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -222,8 +272,6 @@ int wmain(int argc, wchar_t** argv) {
                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
                 ffgOutputInitialized = true;
               }
-              const auto previousCamera = runtimeCamera(shared->control.other);
-              const auto currentCamera = runtimeCamera(shared->control.current);
               FgdsVkPair pair{};
               pair.structSize = sizeof(pair);
               pair.version = FGDS_VK_VERSION;
@@ -232,10 +280,19 @@ int wmain(int argc, wchar_t** argv) {
               pair.frames[1] = frame->metadata(shared->control.frameId,
                 shared->control.frameId * 16666666ull, currentCamera);
               pair.alpha = std::clamp(shared->control.fgAlpha, 0.0f, 1.0f);
+              FgdsVkPairV2 pairV2{};
+              pairV2.structSize = sizeof(pairV2);
+              pairV2.version = FGDS_VK_VERSION_0_2;
+              pairV2.frames[0] = previousFrame->metadataV2(shared->control.frameId - 1,
+                (shared->control.frameId - 1) * 16666666ull, previousCamera);
+              pairV2.frames[1] = frame->metadataV2(shared->control.frameId,
+                shared->control.frameId * 16666666ull, currentCamera);
+              pairV2.alpha = pair.alpha;
               const auto outputImage = ffgOutput->fgds();
-              if (ffg.record(ffg.context, commandBuffer, &pair, &outputImage) != VK_SUCCESS)
+              if (ffg.recordPair(commandBuffer, pair, pairV2, outputImage) != VK_SUCCESS)
                 throw std::runtime_error("FFG Vulkan record failed");
-              log << "FFG frame generated id=" << shared->control.frameId << '\n';
+              log << "FFG frame generated id=" << shared->control.frameId
+                << (ffg.useV2 ? " protocol=V2" : " protocol=V1") << '\n';
               generated = true;
             }
           });
