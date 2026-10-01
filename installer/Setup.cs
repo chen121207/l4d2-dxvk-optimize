@@ -11,8 +11,8 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyVersion("0.1.4.0")]
-[assembly: AssemblyFileVersion("0.1.4.0")]
+[assembly: AssemblyVersion("0.1.5.0")]
+[assembly: AssemblyFileVersion("0.1.5.0")]
 
 // Product.g.cs is generated from the exact payload hashes by build-installer.ps1.
 internal static class Setup
@@ -354,7 +354,7 @@ internal static class Setup
                 key.SetValue("InstallLocation", root);
                 key.SetValue("UninstallString", Quote(Child(root, Uninstaller)) + " --uninstall");
                 key.SetValue("QuietUninstallString", Quote(Child(root, Uninstaller)) + " --uninstall --silent");
-                key.SetValue("DisplayIcon", Child(root, Uninstaller));
+                key.SetValue("DisplayIcon", Child(root, MainProgram));
                 key.SetValue("URLInfoAbout", "https://github.com/chen121207/l4d2-dxvk-optimize");
                 key.SetValue("NoModify", 1, RegistryValueKind.DWord);
                 key.SetValue("NoRepair", 1, RegistryValueKind.DWord);

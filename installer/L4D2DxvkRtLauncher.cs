@@ -2,9 +2,13 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 using System.Xml.Serialization;
+
+[assembly: AssemblyVersion("0.1.5.0")]
+[assembly: AssemblyFileVersion("0.1.5.0")]
 
 // The launcher is deliberately separate from Setup.cs.  Setup installs this
 // executable and creates its shortcut; this program owns only the per-user
@@ -148,6 +152,8 @@ internal sealed class LauncherForm : Form
         MinimumSize = new Size(560, 250);
         ClientSize = new Size(620, 290);
         Font = new Font("Microsoft YaHei UI", 9F);
+        try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+        catch (Exception) { /* The embedded icon remains available in the EXE even if extraction fails. */ }
 
         Label title = new Label {
             AutoSize = true,

@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $project = Split-Path $repo -Parent
-$version = '0.1.4'
+$version = '0.1.5'
 if (-not $DxvkDll) { $DxvkDll = Join-Path $repo 'build-msvc-x86\src\d3d9\d3d9.dll' }
 if (-not $RtHelper) { $RtHelper = Join-Path $repo 'build-rt-x64\Release\rt_helper.exe' }
 if (-not $FfgDll) { $FfgDll = Join-Path $project 'FreeFrameGen\build-vulkan\Release\FreeFrameGenVulkan.dll' }
@@ -34,6 +34,8 @@ Assert-PeMachine $RtHelper 0x8664
 Assert-PeMachine $FfgDll 0x8664
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { throw '.NET Framework 4.x C# compiler is required' }
+$icon = Join-Path $repo 'installer\assets\l4d2-dxvk-rt.ico'
+if (-not (Test-Path -LiteralPath $icon -PathType Leaf)) { throw "Missing application icon: $icon" }
 $output = Join-Path $OutputDirectory ('L4D2-DXVK-RT-Setup-' + $version + '.exe')
 if (Test-Path -LiteralPath $output) { throw "Output exists; choose a fresh -OutputDirectory: $output" }
 
@@ -44,7 +46,7 @@ $launcherExe = Join-Path $work 'L4D2-DXVK-RT.exe'
 if (-not (Test-Path -LiteralPath $launcherSource -PathType Leaf)) { throw "Missing launcher source: $launcherSource" }
 $launcherArguments = @('/nologo','/target:winexe','/platform:x64','/optimize+','/warn:4','/warnaserror+','/codepage:65001',
     '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:System.Xml.dll',
-    ('/out:' + $launcherExe), $launcherSource)
+    ('/win32icon:' + $icon), ('/out:' + $launcherExe), $launcherSource)
 & $compiler @launcherArguments
 if ($LASTEXITCODE) { throw 'Launcher compilation failed' }
 Assert-PeMachine $launcherExe 0x8664
@@ -95,7 +97,7 @@ $source = Join-Path $work 'Product.g.cs'
 $arguments = @('/nologo','/target:winexe','/platform:x64','/optimize+','/warn:4','/warnaserror+','/codepage:65001',
     '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll',
     '/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll',
-    ('/resource:' + $archive + ',payload.zip'), ('/out:' + $output),
+    ('/resource:' + $archive + ',payload.zip'), ('/win32icon:' + $icon), ('/out:' + $output),
     (Join-Path $repo 'installer\Setup.cs'), $source)
 & $compiler @arguments
 if ($LASTEXITCODE) { throw 'Installer compilation failed' }
