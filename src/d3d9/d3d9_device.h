@@ -1610,6 +1610,8 @@ namespace dxvk {
     dxvk::rt::bridge::Camera        m_rtCamera = {};
     bool                            m_rtHasCamera = false;
     bool                            m_rtIncompleteScene = false;
+    bool                            m_rtLoggedUnsupportedVs = false;
+    bool                            m_rtLoggedIncomplete = false;
     uint32_t                        m_rtObjectId = 1u;
 
     MemoryFilePool                  m_memoryAllocator;

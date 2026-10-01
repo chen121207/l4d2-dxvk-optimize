@@ -3,6 +3,11 @@ L4D2 DXVK RT — experimental offline package
 This build is not proven to render a complete L4D2 world or to be VAC-safe.
 It does not permanently install a DLL in the game directory.
 
+The RT bridge currently refuses programmable vertex-shader geometry until
+post-vertex-shader capture is implemented. This prevents invalid full-screen
+triangles from replacing the raster frame; a successful helper start alone is
+not proof that L4D2 world lighting is ray-traced.
+
 安装完成后，开始菜单和桌面会创建“L4D2 DXVK RT”快捷方式。
 也可以直接运行 L4D2-DXVK-RT.exe：首次运行会让你选择 L4D2 游戏目录，
 并保存到 %LOCALAPPDATA%\L4D2-DXVK-RT\config.xml。之后启动会直接读取该配置，

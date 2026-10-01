@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $project = Split-Path $repo -Parent
-$version = '0.1.3'
+$version = '0.1.4'
 if (-not $DxvkDll) { $DxvkDll = Join-Path $repo 'build-msvc-x86\src\d3d9\d3d9.dll' }
 if (-not $RtHelper) { $RtHelper = Join-Path $repo 'build-rt-x64\Release\rt_helper.exe' }
 if (-not $FfgDll) { $FfgDll = Join-Path $project 'FreeFrameGen\build-vulkan\Release\FreeFrameGenVulkan.dll' }

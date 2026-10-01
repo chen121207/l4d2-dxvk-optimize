@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <stdexcept>
 
+#include "../util/log/log.h"
+#include "../util/util_string.h"
+
 namespace dxvk {
 
   using namespace dxvk::rt::bridge;
@@ -52,7 +55,10 @@ namespace dxvk {
 
   D3D9RtBridge::D3D9RtBridge() {
     m_triangles.reserve(32768);
-    start();
+    if (start())
+      Logger::info("D3D9 RT bridge: 64-bit helper started");
+    else
+      Logger::warn("D3D9 RT bridge: helper could not be started");
   }
 
   D3D9RtBridge::~D3D9RtBridge() {
@@ -138,9 +144,14 @@ namespace dxvk {
     SetEvent(m_ready);
     HANDLE waits[] = { m_done, m_process };
     const DWORD result = WaitForMultipleObjects(2, waits, FALSE, 30000);
-    if (result != WAIT_OBJECT_0)
+    if (result != WAIT_OBJECT_0) {
+      Logger::warn(str::format("D3D9 RT bridge: command failed or timed out, command=", uint32_t(command)));
       return false;
-    return InterlockedCompareExchange(&control(m_shared)->status, NotReady, NotReady) == Ok;
+    }
+    const bool success = InterlockedCompareExchange(&control(m_shared)->status, NotReady, NotReady) == Ok;
+    if (!success)
+      Logger::warn(str::format("D3D9 RT bridge: helper rejected command, command=", uint32_t(command)));
+    return success;
   }
 
   bool D3D9RtBridge::render(uint32_t width, uint32_t height,
@@ -191,6 +202,9 @@ namespace dxvk {
       output.motion.clear();
       output.objectId.clear();
     }
+    if ((m_frameId % 120u) == 1u)
+      Logger::info(str::format("D3D9 RT bridge: rendered frame ", m_frameId,
+        " triangles=", m_triangles.size(), " extent=", width, "x", height));
     return true;
   }
 

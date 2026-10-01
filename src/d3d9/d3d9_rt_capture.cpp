@@ -81,6 +81,21 @@ namespace dxvk {
       return;
     }
 
+    // A programmable D3D9 vertex shader may apply skinning, view/projection,
+    // or clip-space post-processing that is not represented by D3DTS_WORLD.
+    // Treating its input vertices as world-space geometry creates invalid
+    // triangles (most visibly a full-screen gray plane) in the RT BLAS. Until
+    // we capture post-VS positions, reject the whole frame instead of replacing
+    // a valid raster frame with an incomplete scene.
+    if (UseProgrammableVS()) {
+      m_rtIncompleteScene = true;
+      if (!m_rtLoggedUnsupportedVs) {
+        Logger::warn("D3D9 RT: programmable vertex-shader draw is not captureable; keeping the raster frame");
+        m_rtLoggedUnsupportedVs = true;
+      }
+      return;
+    }
+
     // PositionT vertices are already in screen space (HUD, text and many
     // particles). They are not world geometry and applying the world matrix
     // would poison the RT scene with invalid triangles.
@@ -111,7 +126,7 @@ namespace dxvk {
 
     auto vertex = [&](uint32_t index, Vec3& result) {
       const int64_t vertexIndex = int64_t(index) + baseVertex;
-      if (vertexIndex < 0 || uint64_t(vertexIndex) > (vertexBytes / stride))
+      if (vertexIndex < 0 || uint64_t(vertexIndex) >= (vertexBytes / stride))
         return false;
       const uint64_t offset = uint64_t(vertexOffset) + uint64_t(vertexIndex) * stride + position->Offset;
       if (offset > vertexBytes || vertexBytes - offset < positionBytes)
@@ -206,7 +221,10 @@ namespace dxvk {
   void D3D9DeviceEx::RtCapturePrimitiveUP(D3DPRIMITIVETYPE type, UINT count,
                                            const void* vertices, UINT stride) {
     if (!m_rtBridge || !m_rtBridge->available()) return;
-    const size_t bytes = size_t(count) * 3 * stride;
+    const uint64_t vertexCount = GetVertexCount(type, count);
+    if (vertexCount > std::numeric_limits<size_t>::max() / stride)
+      return;
+    const size_t bytes = size_t(vertexCount) * stride;
     RtCaptureDraw(type, count, static_cast<const uint8_t*>(vertices), bytes,
       stride, 0, nullptr, 0, 0, 0, 0);
   }
@@ -218,13 +236,25 @@ namespace dxvk {
     if (!m_rtBridge || !m_rtBridge->available()) return;
     const uint32_t indexStride = format == D3DFMT_INDEX16 ? 2 : format == D3DFMT_INDEX32 ? 4 : 0;
     if (!indexStride) return;
+    const uint64_t vertexEnd = uint64_t(minVertex) + uint64_t(numVertices);
+    const uint64_t indexCount = GetVertexCount(type, count);
+    if (vertexEnd > std::numeric_limits<size_t>::max() / stride
+        || indexCount > std::numeric_limits<size_t>::max() / indexStride)
+      return;
     RtCaptureDraw(type, count, static_cast<const uint8_t*>(vertices),
-      size_t(minVertex + numVertices) * stride, stride, 0,
-      static_cast<const uint8_t*>(indices), size_t(count) * 3 * indexStride,
+      size_t(vertexEnd) * stride, stride, 0,
+      static_cast<const uint8_t*>(indices), size_t(indexCount) * indexStride,
       indexStride, 0, 0);
   }
 
   bool D3D9DeviceEx::RtRenderFrame(uint32_t width, uint32_t height, D3D9RtBridge::Output& output) {
+    if (m_rtIncompleteScene) {
+      if (!m_rtLoggedIncomplete) {
+        Logger::warn("D3D9 RT: frame contains unsupported programmable geometry; RT replacement skipped");
+        m_rtLoggedIncomplete = true;
+      }
+      return false;
+    }
     if (!m_rtBridge || !m_rtBridge->available() || !m_rtHasCamera
         || m_rtBridge->sceneOverflowed()
         || m_rtBridge->triangleCount() < dxvk::rt::bridge::MinTrianglesForFrame)
