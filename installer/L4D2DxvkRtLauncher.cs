@@ -7,8 +7,8 @@ using System.Text;
 using System.Windows.Forms;
 using System.Xml.Serialization;
 
-[assembly: AssemblyVersion("0.1.5.0")]
-[assembly: AssemblyFileVersion("0.1.5.0")]
+[assembly: AssemblyVersion("0.1.6.0")]
+[assembly: AssemblyFileVersion("0.1.6.0")]
 
 // The launcher is deliberately separate from Setup.cs.  Setup installs this
 // executable and creates its shortcut; this program owns only the per-user
@@ -25,6 +25,12 @@ public sealed class LauncherConfiguration
 
     [XmlElement("EnableFFG")]
     public bool EnableFFG;
+
+    // RT is deliberately opt-in.  A missing element in an older config file
+    // deserializes to false, so upgrading never silently changes the render
+    // path for an existing installation.
+    [XmlElement("EnableRayTracing")]
+    public bool EnableRayTracing;
 
     [XmlElement("UpdatedUtc")]
     public string UpdatedUtc = string.Empty;
@@ -150,7 +156,7 @@ internal sealed class LauncherForm : Form
         Text = "L4D2 DXVK RT";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(560, 250);
-        ClientSize = new Size(620, 290);
+        ClientSize = new Size(620, 330);
         Font = new Font("Microsoft YaHei UI", 9F);
         try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
         catch (Exception) { /* The embedded icon remains available in the EXE even if extraction fails. */ }
@@ -181,36 +187,53 @@ internal sealed class LauncherForm : Form
         chooseButton.Click += delegate { ChooseGameDirectory(); };
         Controls.Add(chooseButton);
 
-        ffgBox = new CheckBox {
+        CheckBox rtBox = new CheckBox {
             Left = 18,
             Top = 125,
             AutoSize = true,
-            Text = "启用 FreeFrameGen（实验功能）",
+            Text = "启用 DXVK 光线追踪（实验功能）",
+            Checked = configuration.EnableRayTracing
+        };
+        rtBox.CheckedChanged += delegate {
+            configuration.EnableRayTracing = rtBox.Checked;
+            SaveConfiguration(false);
+            ffgBox.Enabled = rtBox.Checked;
+            statusLabel.Text = rtBox.Checked ? "光线追踪已开启（实验路径）。" :
+                "光线追踪已关闭，将使用原生 DXVK 路线；FFG 本次启动会自动停用。";
+        };
+        Controls.Add(rtBox);
+
+        ffgBox = new CheckBox {
+            Left = 18,
+            Top = 151,
+            AutoSize = true,
+            Text = "启用 FreeFrameGen（实验功能，需要光追）",
             Checked = configuration.EnableFFG
         };
         ffgBox.CheckedChanged += delegate { SaveConfiguration(false); };
         Controls.Add(ffgBox);
+        ffgBox.Enabled = configuration.EnableRayTracing;
 
-        Button startButton = new Button { Left = 18, Top = 165, Width = 145, Height = 32, Text = "启动 L4D2（离线）" };
+        Button startButton = new Button { Left = 18, Top = 191, Width = 145, Height = 32, Text = "启动 L4D2（离线）" };
         startButton.Click += delegate { StartOffline(false); };
         Controls.Add(startButton);
 
-        Button recoverButton = new Button { Left = 175, Top = 165, Width = 125, Height = 32, Text = "恢复临时会话" };
+        Button recoverButton = new Button { Left = 175, Top = 191, Width = 125, Height = 32, Text = "恢复临时会话" };
         recoverButton.Click += delegate { StartOffline(true); };
         Controls.Add(recoverButton);
 
-        Button configButton = new Button { Left = 310, Top = 165, Width = 125, Height = 32, Text = "打开配置目录" };
+        Button configButton = new Button { Left = 310, Top = 191, Width = 125, Height = 32, Text = "打开配置目录" };
         configButton.Click += delegate { OpenConfigurationDirectory(); };
         Controls.Add(configButton);
 
-        Button uninstallButton = new Button { Left = 445, Top = 165, Width = 155, Height = 32, Text = "卸载 L4D2 DXVK RT" };
+        Button uninstallButton = new Button { Left = 445, Top = 191, Width = 155, Height = 32, Text = "卸载 L4D2 DXVK RT" };
         uninstallButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         uninstallButton.Click += delegate { StartUninstaller(); };
         Controls.Add(uninstallButton);
 
         statusLabel = new Label {
             Left = 18,
-            Top = 220,
+            Top = 246,
             Width = 580,
             Height = 48,
             Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
@@ -245,7 +268,8 @@ internal sealed class LauncherForm : Form
         }
         else
         {
-            statusLabel.Text = "已读取配置：" + configuration.GameDirectory;
+            statusLabel.Text = "已读取配置：" + configuration.GameDirectory +
+                (configuration.EnableRayTracing ? "（光线追踪已开启）" : "（光线追踪已关闭，使用原生 DXVK）");
         }
         if (startRequested) BeginInvoke((MethodInvoker)delegate { StartOffline(false); });
     }
@@ -274,7 +298,8 @@ internal sealed class LauncherForm : Form
                     configuration.GameDirectory = GameDirectoryValidation.Normalize(dialog.SelectedPath);
                     SaveConfiguration(true);
                     UpdatePathDisplay();
-                    statusLabel.Text = "配置已保存。以后启动会直接使用此目录。";
+                    statusLabel.Text = "配置已保存。以后启动会直接使用此目录；" +
+                        (configuration.EnableRayTracing ? "光线追踪已开启。" : "光线追踪已关闭，使用原生 DXVK。" );
                     return true;
                 }
             }
@@ -332,6 +357,7 @@ internal sealed class LauncherForm : Form
         SaveConfiguration(true);
         string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(LauncherPaths.Script) +
             " -GameDirectory " + Quote(configuration.GameDirectory);
+        if (configuration.EnableRayTracing) arguments += " -EnableRayTracing";
         if (configuration.EnableFFG) arguments += " -EnableFFG";
         if (recover) arguments += " -Recover";
         try

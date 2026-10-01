@@ -1,184 +1,245 @@
-# DXVK
+# L4D2 DXVK Optimize
 
-A Vulkan-based translation layer for Direct3D 8/9/10/11 which allows running 3D applications on Linux using Wine.
+Windows-only research fork of [DXVK](https://github.com/doitsujin/dxvk) for
+Left 4 Dead 2. The project keeps the original game, maps, materials and game
+logic intact while providing a Vulkan rendering path and an optional external
+Vulkan ray-tracing/Frame Generation pipeline.
 
-For the current status of the project, please refer to the [project wiki](https://github.com/doitsujin/dxvk/wiki).
+这是一个面向 Windows 的 DXVK 研究分支，目标是让 Left 4 Dead 2 在保留原有
+游戏逻辑、地图、模型和玩法的前提下，通过 Vulkan 渲染，并按需接入独立的
+Vulkan 光线追踪和帧生成运行时。
 
-The most recent development builds can be found [here](https://github.com/doitsujin/dxvk/actions/workflows/artifacts.yml?query=branch%3Amaster).
+> **Status / 状态:** experimental, offline-only / 实验性、仅限离线测试
 
-Release builds can be found [here](https://github.com/doitsujin/dxvk/releases).
+The fork is not a new game, a content mod, a D3D12 renderer, or a promise of
+VAC compatibility. It is based on the upstream DXVK D3D9 implementation and
+adds an opt-in RT bridge for research.
 
-## How to use
-In order to install a DXVK package obtained from the [release](https://github.com/doitsujin/dxvk/releases) page into a given wine prefix, copy or symlink the DLLs into the following directories as follows, then open `winecfg` and manually add `native` DLL overrides for `d3d8`, `d3d9`, `d3d10core`, `d3d11` and `dxgi` under the Libraries tab.
+本项目不是重新发布 L4D2，也不是内容 Mod 或 D3D12 渲染器，不能承诺 VAC
+兼容。当前核心仍然是 DXVK 的 D3D9 → Vulkan 路线，并在此之上增加可选的
+光追桥接实验。
 
-In a default Wine prefix that would be as follows:
-```
-export WINEPREFIX=/path/to/wineprefix
-cp x64/*.dll $WINEPREFIX/drive_c/windows/system32
-cp x32/*.dll $WINEPREFIX/drive_c/windows/syswow64
-winecfg
-```
+## What this project does / 项目做什么
 
-For a pure 32-bit Wine prefix (non default) the 32-bit DLLs instead go to the `system32` directory:
-```
-export WINEPREFIX=/path/to/wineprefix
-cp x32/*.dll $WINEPREFIX/drive_c/windows/system32
-winecfg
-```
+* **Native DXVK raster path / DXVK 原生栅格路径** — L4D2 remains a 32-bit
+  D3D9 application. The packaged `d3d9.dll` translates its calls to Vulkan.
+  When RT is disabled, this is the complete normal rendering route.
+* **Optional Vulkan RT helper / 可选 Vulkan 光追助手** — supported geometry and
+  camera data can be sent from the 32-bit DXVK process to the 64-bit
+  `rt_helper.exe`, which owns Vulkan ray-query/acceleration-structure work.
+* **FGDS/FFG hand-off / FGDS/FFG 接口** — the helper can produce Color, Depth,
+  Motion Vector and Object ID data for the independent
+  [FreeFrameGen (FFG)](https://github.com/chen121207/FreeFrameGen) runtime.
+* **Offline launcher / 离线启动器** — the installer provides a launcher that
+  selects the L4D2 directory once, stores it per user, and starts a temporary
+  `-insecure` session without permanently replacing game DLLs.
 
-Verify that your application uses DXVK instead of wined3d by enabling the HUD (see notes below).
+## Architecture / 架构
 
-In order to remove DXVK from a prefix, remove the DLLs and DLL overrides, and run `wineboot -u` to restore the original DLL files.
-
-Tools such as Steam Play, Lutris, Bottles, Heroic Launcher, etc will automatically handle setup of dxvk on their own when enabled.
-
-#### DLL dependencies 
-Listed below are the DLL requirements for using DXVK with any single API.
-
-- d3d8: `d3d8.dll` and `d3d9.dll`
-- d3d9: `d3d9.dll`
-- d3d10: `d3d10core.dll`, `d3d11.dll` and `dxgi.dll`
-- d3d11: `d3d11.dll` and `dxgi.dll`
-
-### Notes on Vulkan drivers
-Before reporting an issue, please check the [Wiki](https://github.com/doitsujin/dxvk/wiki/Driver-support) page on the current driver status and make sure you run a recent enough driver version for your hardware.
-
-### Online multi-player games
-Manipulation of Direct3D libraries in multi-player games may be considered cheating and can get your account **banned**. This may also apply to single-player games with an embedded or dedicated multiplayer portion. **Use at your own risk.**
-
-### HUD
-The `DXVK_HUD` environment variable controls a HUD which can display the framerate and some stat counters. It accepts a comma-separated list of the following options:
-- `devinfo`: Displays the name of the GPU and the driver version.
-- `fps`: Shows the current frame rate.
-- `frametimes`: Shows a frame time graph.
-- `submissions`: Shows the number of command buffers submitted per frame.
-- `drawcalls`: Shows the number of draw calls and render passes per frame.
-- `pipelines`: Shows the total number of graphics and compute pipelines.
-- `descriptors`: Shows the number of descriptor pools and descriptor sets.
-- `memory`: Shows the amount of device memory allocated and used.
-- `allocations`: Shows detailed memory chunk suballocation info.
-- `gpuload`: Shows estimated GPU load. May be inaccurate.
-- `version`: Shows DXVK version.
-- `api`: Shows the D3D feature level used by the application.
-- `cs`: Shows worker thread statistics.
-- `compiler`: Shows shader compiler activity
-- `samplers`: Shows the current number of sampler pairs used *[D3D9 Only]*
-- `swvp`: Shows the vertex processing mode and the current number of software vertex processing shaders *[D3D9 Only]*
-- `scale=x`: Scales the HUD by a factor of `x` (e.g. `1.5`)
-- `opacity=y`: Adjusts the HUD opacity by a factor of `y` (e.g. `0.5`, `1.0` being fully opaque).
-
-Additionally, `DXVK_HUD=1` has the same effect as `DXVK_HUD=devinfo,fps`, and `DXVK_HUD=full` enables all available HUD elements.
-
-### Logs
-When used with Wine, DXVK will print log messages to `stderr`. Additionally, standalone log files can optionally be generated by setting the `DXVK_LOG_PATH` variable, where log files in the given directory will be called `app_d3d11.log`, `app_dxgi.log` etc., where `app` is the name of the game executable.
-
-On Windows, log files will be created in the game's working directory by default, which is usually next to the game executable.
-
-### Device filter
-Some applications do not provide a method to select a different GPU. In that case, DXVK can be forced to use a given device:
-- `DXVK_FILTER_DEVICE_NAME="Device Name"` Selects devices with a matching Vulkan device name, which can be retrieved with tools such as `vulkaninfo`. Matches on substrings, so "VEGA" or "AMD RADV VEGA10" is supported if the full device name is "AMD RADV VEGA10 (LLVM 9.0.0)", for example. If the substring matches more than one device, the first device matched will be used.
-- `DXVK_FILTER_DEVICE_UUID="00000000000000000000000000000001"` Selects a device by matching its Vulkan device UUID, which can also be retrieved using tools such as `vulkaninfo`. The UUID must be a 32-character hexadecimal string with no dashes. This method provides more precise selection, especially when using multiple identical GPUs.
-
-**Note:** If the device filter is configured incorrectly, it may filter out all devices and applications will be unable to create a D3D device.
-
-### Debugging
-The following environment variables can be used for **debugging** purposes.
-- `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` Enables Vulkan debug layers. Highly recommended for troubleshooting rendering issues and driver crashes. Requires the Vulkan SDK to be installed on the host system.
-- `DXVK_LOG_LEVEL=none|error|warn|info|debug` Controls message logging.
-- `DXVK_LOG_PATH=/some/directory` Changes path where log files are stored. Set to `none` to disable log file creation entirely, without disabling logging.
-- `DXVK_DEBUG=...` Enables one of various debugging modes:
-  - `capture`: Default when used with certain tools. Enables dxvk-internal debug names and debug markers for render passes, shaders, etc.
-  - `hang`: Detects GPU hangs or driver crashes resulting in `VK_ERROR_DEVICE_LOST` and logs failing command(s).
-  - `markers`: Uses `VK_EXT_debug_utils` to forward applocation-provided resource names and debug markers to Vulkan.
-  - `validation`: Enables validation debug callback. Must also set `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` on Linux.
-- `DXVK_CONFIG_FILE=/xxx/dxvk.conf` Sets path to the configuration file.
-- `DXVK_CONFIG="dxgi.hideAmdGpu = True; dxgi.syncInterval = 0"` Can be used to set config variables through the environment instead of a configuration file using the same syntax. `;` is used as a seperator.
-- `DXVK_SHADER_CACHE=0`: Disables the internal shader cache.
-- `DXVK_SHADER_CACHE_PATH=/some/directory`: Path to internal shader cache files. By default, this will use `%LOCALAPPDATA%/dxvk` in a Windows
-  or Wine environment, and `$HOME/.cache` or `$XDG_CACHE_HOME` in a native Linux environment.
-
-### Graphics Pipeline Library
-On drivers which support `VK_EXT_graphics_pipeline_library` Vulkan shaders will be compiled at the time the game loads its D3D shaders, rather than at draw time. This reduces or eliminates shader compile stutter in many games when compared to the previous system.
-
-In games that load their shaders during loading screens or in the menu, this can lead to prolonged periods of very high CPU utilization, especially on weaker CPUs. For affected games it is recommended to wait for shader compilation to finish before starting the game to avoid stutter and low performance. Shader compiler activity can be monitored with `DXVK_HUD=compiler`.
-
-**Note:** Games which only load their D3D shaders at draw time (e.g. most Unreal Engine games) will still exhibit some stutter, although it should still be less severe than without this feature.
-
-## Build instructions
-
-In order to pull in all submodules that are needed for building, clone the repository using the following command:
-```
-git clone --recursive https://github.com/doitsujin/dxvk.git
+```text
+L4D2 (32-bit D3D9)
+       |
+       v
+DXVK d3d9.dll (32-bit, Vulkan raster backend)
+       |
+       +-- RT off: normal DXVK Vulkan rendering -> Present
+       |
+       +-- RT on: supported geometry/camera
+                   -> shared-memory bridge
+                   -> rt_helper.exe (64-bit Vulkan RT)
+                   -> RT color/output
+                   -> DXVK backbuffer -> Present
+                                      |
+                                      +-> optional FFG/FGDS input
 ```
 
-### Requirements:
-- [wine 10.0](https://www.winehq.org/) or newer
-- [Meson](https://mesonbuild.com/) build system (at least version 0.58)
-- [Mingw-w64](https://www.mingw-w64.org) compiler and headers (at least version 10.0)
-- [glslang](https://github.com/KhronosGroup/glslang) compiler
+L4D2 is 32-bit while the tested RTX 3050 driver exposes the required ray-query
+and acceleration-structure capabilities only to a 64-bit process. The helper
+boundary is therefore intentional; it is not a second game executable and it
+does not replace the normal DXVK swap chain.
 
-### Building DLLs
+L4D2 是 32 位进程，而当前测试的 RTX 3050 驱动只在 64 位进程中暴露完整的
+ray-query 和加速结构能力，因此必须使用 64 位助手进程。助手只负责可选的
+光追计算，不替换游戏本身，也不改变普通 DXVK 的 Present 路径。
 
-#### The simple way
-Inside the DXVK directory, run:
+## Install and run / 安装与运行
+
+1. Run `L4D2-DXVK-RT-Setup-*.exe` and install to a user-writable directory.
+2. Start **L4D2 DXVK RT** from the desktop or Start-menu shortcut.
+3. On the first run, select the directory containing `left4dead2.exe` and
+   `bin\shaderapidx9.dll`. The choice is saved to:
+   `%LOCALAPPDATA%\L4D2-DXVK-RT\config.xml`.
+4. Choose the rendering options in the launcher:
+   * **Enable Vulkan RT / 启用 Vulkan 光追**: enables the opt-in RT bridge.
+   * **Enable FreeFrameGen / 启用 FreeFrameGen**: enables the experimental FFG
+     hand-off when its DLL is installed and RT is enabled. The launcher disables
+     this option while RT is off.
+5. Click **Start L4D2 (offline)**. The launcher starts the game with
+   `-insecure`, temporarily installs the proxy DLLs for that session, and
+   restores the game directory after the game exits.
+
+之后启动会直接读取保存的游戏目录，不会重复询问。运行
+`L4D2-DXVK-RT.exe --configure` 可以重新选择目录；`--start` 适合快捷方式或
+自动启动；如果上次 Windows/游戏崩溃留下了临时会话，可先使用界面中的
+**Recover session / 恢复临时会话**，或者直接给
+`tools\Launch-Offline.ps1` 传入 `-Recover`。
+
+The launcher does not overwrite an existing proxy DLL. Close L4D2 before
+installing or uninstalling. Uninstall is available from the launcher, Windows
+installed-app settings, or `uninstall.exe` in the installation directory.
+
+启动器不会覆盖游戏目录中已有的代理 DLL。安装、卸载和恢复前请先关闭 L4D2。
+卸载可以通过启动器、Windows“已安装的应用”，或安装目录中的
+`uninstall.exe` 执行。
+
+## RT switch behavior / 光追开关行为
+
+The RT checkbox is an explicit runtime switch, not a claim that every L4D2
+draw is ray-traced:
+
+* **Off / 关闭** — `dxvk.enableRayTracing = False`; the game uses the normal
+  DXVK Vulkan raster path. No RT helper is required.
+* **On / 开启** — `dxvk.enableRayTracing = True`; DXVK attempts to capture only
+  supported world geometry and sends it to the x64 helper. If the helper is
+  missing, the GPU lacks the required Vulkan features, a frame is invalid, or
+  a draw is outside the supported capture set, DXVK keeps the normal raster
+  frame instead of presenting invalid geometry.
+
+The setting is stored with the launcher configuration and can be changed at
+any time before starting a session. The authoritative package configuration is
+`dxvk.conf`; environment variables supplied by the launcher select the helper
+and optional FFG runtime.
+
+光追开关只是路径选择开关，并不代表所有材质、粒子和世界绘制都已经完成
+光追。关闭时明确走 DXVK 原生 Vulkan 栅格路线；开启时只有满足条件的绘制
+才会送入助手，失败时安全回退到栅格帧。
+
+## Current RT and FFG status / 当前 RT 与 FFG 状态
+
+The standalone RT lab is a real GPU implementation, not a CPU ray-tracing
+fallback. It builds BLAS/TLAS, runs a `VK_KHR_ray_query` shader, and verifies
+Color/Depth/Motion/Object-ID output in the test host. The x86-to-x64 bridge and
+the optional second-frame FFG record path are also covered by development
+tests.
+
+The in-game path is still an integration prototype:
+
+* programmable vertex-shader geometry and unsupported post-transform data are
+  deliberately skipped to avoid the invalid giant-triangle/grey-frame failure;
+* complete L4D2 material, transparency, particle, shadow and world coverage is
+  not proven;
+* the shared-memory bridge adds synchronization and copy cost, so performance
+  can be lower than plain DXVK;
+* FFG input is experimental and does not yet guarantee image quality, latency,
+  or frame pacing in every scene;
+* DLSS, a production compositor, and a final user-facing RT quality menu are
+  not part of this release.
+
+独立 RT 测试程序已经能够在支持的 GPU 上执行真实 Vulkan ray-query，并验证
+颜色、深度、运动矢量和 Object ID 输出；但游戏内接入仍是原型。为了避免
+快速转动视角时出现错误巨大三角面，当前会跳过无法可靠捕获的可编程顶点
+着色器绘制。因此当前版本不能宣称 L4D2 世界已经完整光追，也不能保证
+FFG 在所有场景中都稳定或低延迟。
+
+## Safety and online play / 安全与联机
+
+This package is intended for local, offline research only. It always launches
+the test session with `-insecure`. Do **not** use the modified renderer or RT
+helper on VAC-secured servers, matchmaking, or other protected multiplayer
+services. Valve/Steam may treat graphics DLL replacement or process injection
+as unsupported even when the code only changes rendering. No VAC-safe claim is
+made by this repository.
+
+本项目只用于本地离线研究。启动器会使用 `-insecure`，请不要把修改后的
+渲染 DLL、RT 助手或 FFG 运行时带入 VAC 服务器、匹配或其他受保护的联机
+服务。仓库不作任何“不会误封”或 VAC 安全承诺。
+
+## Configuration and diagnostics / 配置与诊断
+
+Important files and variables:
+
+| Item | Purpose |
+| --- | --- |
+| `dxvk.conf` | DXVK options, including `dxvk.enableRayTracing`. |
+| `DXVK_CONFIG_FILE` | Selects the package configuration file. |
+| `DXVK_CONFIG` | The launcher sets the RT option explicitly for each session. |
+| `DXVK_RT_HELPER_PATH` | Overrides the x64 `rt_helper.exe` path. |
+| `DXVK_FFG_ENABLE=1` | Requests helper-side FFG when available. |
+| `DXVK_FFG_VULKAN_PATH` | Overrides `FreeFrameGenVulkan.dll`. |
+| `DXVK_LOG_PATH` | Selects the DXVK log directory. |
+| `DXVK_HUD=full` | Shows standard DXVK GPU/FPS/pipeline diagnostics. |
+| `%LOCALAPPDATA%\L4D2-DXVK-RT\launcher.log` | Launcher and offline-session log. |
+| `rt_helper.log` | x64 helper and FFG bridge diagnostics. |
+
+If RT is enabled but no valid helper output is available, first compare the
+same scene with RT disabled. A correct RT-off frame confirms that the ordinary
+DXVK path is still being used; it does not prove that RT capture succeeded.
+
+如果打开光追后画面异常，先关闭光追启动同一场景进行对照。关闭时能正常
+显示，只能证明 DXVK 栅格路径正常，不能证明游戏内 RT 捕获已经完整。
+
+## Build from source / 从源码构建
+
+This repository retains the upstream DXVK build system and submodules. Clone
+with submodules:
+
+```powershell
+git clone --recursive https://github.com/chen121207/l4d2-dxvk-optimize.git
+cd l4d2-dxvk-optimize
 ```
-./package-release.sh master /your/target/directory --no-package
+
+Requirements / 环境要求:
+
+* Windows 10/11, Visual Studio C++ tools, and a recent Vulkan driver;
+* Meson/Ninja and the Vulkan/SPIR-V headers and shader tools required by DXVK;
+* CMake 3.24+ and `glslangValidator` for `experimental/rt`;
+* .NET Framework 4.x C# compiler for the self-extracting installer.
+
+Build the x86 DXVK DLL using the normal DXVK Meson configuration. Build the
+RT lab separately:
+
+```powershell
+cmake -S experimental/rt -B build-rt-x64 -G "Visual Studio 18 2026" -A x64
+cmake --build build-rt-x64 --config Release --parallel 4
+cmake -S experimental/rt -B build-rt-x86 -G "Visual Studio 18 2026" -A Win32
+cmake --build build-rt-x86 --config Release --target rt_bridge_client --parallel 4
 ```
 
-This will create a folder `dxvk-master` in `/your/target/directory`, which contains both 32-bit and 64-bit versions of DXVK, which can be set up in the same way as the release versions as noted above.
+Run the standalone GPU and bridge checks before packaging:
 
-In order to preserve the build directories for development, pass `--dev-build` to the script. This option implies `--no-package`. After making changes to the source code, you can then do the following to rebuild DXVK:
-```
-# change to build.32 for 32-bit
-cd /your/target/directory/build.64
-ninja install
-```
-
-#### Compiling manually
-```
-# 64-bit build. For 32-bit builds, replace
-# build-win64.txt with build-win32.txt
-meson setup --cross-file build-win64.txt --buildtype release --prefix /your/dxvk/directory build.w64
-cd build.w64
-ninja install
+```powershell
+build-rt-x64/Release/rt_test.exe --output artifacts/rt-test
+New-Item -ItemType Directory -Force bridge-run | Out-Null
+Copy-Item build-rt-x86/Release/rt_bridge_client.exe bridge-run/
+Copy-Item build-rt-x64/Release/rt_helper.exe bridge-run/
+& .\bridge-run\rt_bridge_client.exe
 ```
 
-The D3D8, D3D9, D3D10, D3D11 and DXGI DLLs will be located in `/your/dxvk/directory/bin`.
+The hardware test may return `77` when the GPU does not expose ray-query,
+acceleration-structure, buffer-address and required storage-image features. It
+does not silently switch to CPU tracing.
 
-### Build troubleshooting
-DXVK requires threading support from your mingw-w64 build environment. If you
-are missing this, you may see "error: ‘std::cv_status’ has not been declared"
-or similar threading related errors.
+Use `tools/build-installer.ps1` after the x86 DLL, x64 helper and optional FFG
+DLL have been built. The script verifies PE architecture, embeds the launcher,
+creates the manifest, and produces the self-extracting installer.
 
-On Debian and Ubuntu, this can be resolved by using the posix alternate, which
-supports threading. For example, choose the posix alternate from these
-commands:
-```
-update-alternatives --config x86_64-w64-mingw32-gcc
-update-alternatives --config x86_64-w64-mingw32-g++
-update-alternatives --config i686-w64-mingw32-gcc
-update-alternatives --config i686-w64-mingw32-g++
-```
-For non debian based distros, make sure that your mingw-w64-gcc cross compiler 
-does have `--enable-threads=posix` enabled during configure. If your distro does
-ship its mingw-w64-gcc binary with `--enable-threads=win32` you might have to
-recompile locally or open a bug at your distro's bugtracker to ask for it. 
+## Repository layout / 目录结构
 
-# DXVK Native
+* `src/` — upstream and forked DXVK D3D/Vulkan implementation.
+* `experimental/rt/` — x64 RT helper, bridge client, shaders and GPU tests.
+* `include/fgds/` — Vulkan FGDS data contract used by the helper/FFG boundary.
+* `installer/` — launcher, offline session script, setup/uninstall source and
+  application icon.
+* `tools/build-installer.ps1` — reproducible Windows installer packaging.
+* `RT_FFG_VULKAN.md` — detailed RT/FFG design and current integration notes.
 
-DXVK Native is a version of DXVK which allows it to be used natively without Wine.
+## License and upstream / 许可证与上游
 
-This is primarily useful for game and application ports to either avoid having to write another rendering backend, or to help with port bringup during development.
+The original DXVK portions retain their upstream zlib/libpng license and
+copyright notices. Altered source files are marked in the repository history.
+See [LICENSE](LICENSE) before redistribution. This fork is maintained by
+`chen121207` and is not an official Valve, NVIDIA, Microsoft, or DXVK release.
 
-[Release builds](https://github.com/doitsujin/dxvk/releases) are built using the Steam Runtime.
-
-### How does it work?
-
-DXVK Native replaces certain Windows-isms with a platform and framework-agnostic replacement, for example, `HWND`s can become `SDL_Window*`s, etc.
-All it takes to do that is to add another WSI backend.
-
-**Note:** DXVK Native requires a backend to be explicitly set via the `DXVK_WSI_DRIVER` environment variable. The current built-in options are `SDL3`, `SDL2`, and `GLFW`.
-
-DXVK Native comes with a slim set of Windows header definitions required for D3D9/11 and the MinGW headers for D3D9/11.
-In most cases, it will end up being plug and play with your renderer, but there may be certain teething issues such as:
-- `__uuidof(type)` is supported, but `__uuidof(variable)` is not supported. Use `__uuidof_var(variable)` instead.
+原 DXVK 部分保留上游 zlib/libpng 许可证和版权声明；重新分发前请阅读
+[LICENSE](LICENSE)。本项目由 `chen121207` 维护，不代表 Valve、NVIDIA、
+Microsoft 或 DXVK 官方发布。

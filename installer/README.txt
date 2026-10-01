@@ -20,6 +20,21 @@ not proof that L4D2 world lighting is ray-traced.
 Optional frame generation test:
   add -EnableFFG to that command.
 
+Manual RT test:
+  add -EnableRayTracing (or the compatibility alias -EnableRT) to that command.
+
+The launcher also provides an "Enable DXVK ray tracing" switch. It is off by
+default. With the switch off, the session writes a temporary configuration
+with `dxvk.enableRayTracing = False` and uses the normal DXVK Vulkan raster
+route; the RT helper and FFG path are not started. With it on, the packaged
+64-bit RT helper is used as an experimental path. FFG is only enabled when
+both RT and the FFG checkbox are enabled.
+
+启动器还提供“启用 DXVK 光线追踪”开关，默认关闭。关闭时会创建临时配置并明确
+写入 `dxvk.enableRayTracing = False`，使用原生 DXVK Vulkan 栅格路径，不启动
+RT 助手和 FFG；开启时才会使用 64 位 RT 助手实验路径。只有同时开启光追和
+FFG 选项时，才会启用 FFG。
+
 The launcher requires the two game d3d9.dll locations to be empty. It never
 overwrites an existing proxy. It starts the game with -insecure and removes
 its temporary DLLs after the game exits. If the launcher or Windows crashes,
